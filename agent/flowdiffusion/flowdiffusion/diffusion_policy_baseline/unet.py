@@ -8,23 +8,21 @@ import torch
 class Unet1D(nn.Module):
     def __init__(self, action_space=4, obs_steps=2, obs_dim=39):
         super(Unet1D, self).__init__()
-
-        self.perceiver = PerceiverResampler(
-            dim=512, depth=2
-        )
+        
+        # Calculate exact dimension based on your debug output
+        global_cond_dim = obs_dim * obs_steps  # This will be 78
+        print(f"Using global_cond_dim: {global_cond_dim}")
+        
         self.unet = Unet1D_diffusion(
             input_dim=action_space,
             local_cond_dim=None,
-            global_cond_dim=512*obs_steps+obs_dim*obs_steps,
+            global_cond_dim=global_cond_dim,  # This should be 78
             diffusion_step_embed_dim=256,
             down_dims=[256,512,1024],
             kernel_size=3,
             n_groups=8,
             cond_predict_scale=False
         )
-        self.resnet = ResNet18Encoder()
-
-        self.last_obs = None
 
     def encode_obs_features(self, obs):
         # obs.shape = (b, f, c, h, w)
@@ -34,20 +32,24 @@ class Unet1D(nn.Module):
         self.obs_features = obs
 
     def forward(self, x, t):
-        action, obs, obs_ = x
+        action, obs_ = x
         
         # task_embed = self.perceiver(task_embed).mean(dim=1)
         # obs.shape = (b, f, c, h, w)
         # if self.last_obs is None or not torch.allclose(self.last_obs, obs):
-        self.encode_obs_features(obs)
-        self.last_obs = obs
+        # self.encode_obs_features(obs)
+        # self.last_obs = obs
         # print("obs_features: ", self.obs_features.shape)
         # print("obs_: ", obs_.shape)
+        #print(f"obs_ shape before reshape: {obs_.shape}")
         obs_ = obs_.reshape(obs_.shape[0],-1)
-        global_cond = torch.cat([self.obs_features, obs_], dim=1)
+        #print(f"obs_ shape after reshape: {obs_.shape}")
+
+        #global_cond = torch.cat([self.obs_features, obs_], dim=1)
         # print("global_cond: ", global_cond.shape)
         # print("action: ", action.shape)
         # print("t: ", t)
+        global_cond = obs_
         return self.unet(action, t, global_cond=global_cond)
 
  

@@ -48,7 +48,8 @@ test_scripts/*
 figures
 figure/
 data/
-dummy/
+test_dummy/
+diffusion-results/
 checkpoints/
 wandb/
 offline_rl/

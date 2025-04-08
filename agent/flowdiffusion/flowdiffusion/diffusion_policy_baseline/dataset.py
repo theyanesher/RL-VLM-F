@@ -117,7 +117,7 @@ class MWDataset(Dataset):
             data = {}
 
             # Permute image dimensions to [batch_size, channels, height, width]
-            data['image'] = torch.Tensor(imgs).permute(0, 3, 1, 2)
+            # data['image'] = torch.Tensor(imgs).permute(0, 3, 1, 2)
 
             # Check actions and observations shape
             actions = self.actions[idx]
@@ -131,7 +131,7 @@ class MWDataset(Dataset):
 
             # Add actions and observations to the data dict
             data['action'] = torch.Tensor(actions)
-            data['observation'] = torch.Tensor(observations)
+            data['observation'] = torch.Tensor(observations) # changes made (for image only)
 
             # Print action and observation shapes for debugging
             

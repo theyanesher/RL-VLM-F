@@ -94,7 +94,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
         
         if "metaworld" in env_name:
             rgb_image = env.render()
-            rgb_image = rgb_image[:, :, :]
+            rgb_image = rgb_image[:, :, :] #rgb_image = rgb_image[::-1, :, :]
             if "drawer" in env_name or "sweep" in env_name:
                 rgb_image = rgb_image[100:400, 100:400, :]
         elif env_name in ["CartPole-v1", "Acrobot-v1", "MountainCar-v0", "Pendulum-v0"]:
