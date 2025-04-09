@@ -31,8 +31,8 @@ class TrainConfig:
     seed: int = 42  # Sets Gym, PyTorch and Numpy seeds
     eval_iter :int = 25 #Number of evaluations when running eval method - default 10
     eval_freq: int = int(2000)  # How often (time steps) we evaluate -default 5000
-    n_episodes: int = 5  # How many episodes run during evaluation
-    max_timesteps: int = int(30000)  # Max time steps to run environment - defualt int (1e6)
+    n_episodes: int = 3  # How many episodes run during evaluation
+    max_timesteps: int = int(10000)  # Max time steps to run environment - defualt int (1e6)
     dataset_dir: str = "/home/theya/RL_VLM_F-exp/datagen/Cartpole/datagen_Cartpole-Expert"  # Where to load dataset
     results_folder: str = "/home/theya/RL-VLM-F/diffusion/drawer_results/"  # Where to save results
     milestone: Optional[int] = None   # Model load file name, "" doesn't load

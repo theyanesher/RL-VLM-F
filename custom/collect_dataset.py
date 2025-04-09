@@ -25,7 +25,7 @@ collection_config = {
 }
 
 
-included_tasks = ['button-press-topdown-v2-goal-observable'] #for passing to the call_diff_agent use the env name without the goal observable
+included_tasks = ['shelf-place-v2-goal-observable'] #for passing to the call_diff_agent use the env name without the goal observable
 # included_tasks = [t + "-v2-goal-observable" for t in included_tasks]
 #included_tasks = ['assembly-v2-goal-observable', 'basketball-v2-goal-observable', 'bin-picking-v2-goal-observable', 'box-close-v2-goal-observable', 'button-press-topdown-v2-goal-observable', 'button-press-topdown-wall-v2-goal-observable', 'button-press-v2-goal-observable', 'button-press-wall-v2-goal-observable', 'coffee-button-v2-goal-observable', 'coffee-pull-v2-goal-observable', 'coffee-push-v2-goal-observable', 'dial-turn-v2-goal-observable', 'disassemble-v2-goal-observable', 'door-close-v2-goal-observable', 'door-lock-v2-goal-observable', 'door-open-v2-goal-observable', 'door-unlock-v2-goal-observable', 'hand-insert-v2-goal-observable', 'drawer-close-v2-goal-observable', 'drawer-open-v2-goal-observable', 'faucet-open-v2-goal-observable', 'faucet-close-v2-goal-observable', 'hammer-v2-goal-observable', 'handle-press-side-v2-goal-observable', 'handle-press-v2-goal-observable', 'handle-pull-side-v2-goal-observable', 'handle-pull-v2-goal-observable', 'lever-pull-v2-goal-observable', 'pick-place-wall-v2-goal-observable', 'pick-out-of-hole-v2-goal-observable', 'reach-v2-goal-observable', 'push-back-v2-goal-observable', 'push-v2-goal-observable', 'pick-place-v2-goal-observable', 'plate-slide-v2-goal-observable', 'plate-slide-side-v2-goal-observable', 'plate-slide-back-v2-goal-observable', 'plate-slide-back-side-v2-goal-observable', 'peg-unplug-side-v2-goal-observable', 'soccer-v2-goal-observable', 'stick-push-v2-goal-observable', 'stick-pull-v2-goal-observable', 'push-wall-v2-goal-observable', 'reach-wall-v2-goal-observable', 'shelf-place-v2-goal-observable', 'sweep-into-v2-goal-observable', 'sweep-v2-goal-observable', 'window-open-v2-goal-observable', 'window-close-v2-goal-observable']
 
@@ -125,7 +125,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     # print("\n")   
     # print(len(state), len(actions), len(rewards), len(next_state),len(next_images))   
     # print("\n")
-    demo_dir = "/home/theya/RL/RL-VLM-F/test_dummy/button-press-topdown/expert/" + str(seed) + "/"
+    demo_dir = "/home/theya/RL/RL-VLM-F/test_dummy/shelf-place/expert/" + str(seed) + "/"
     os.makedirs(demo_dir, exist_ok=True)
     for i, frame in enumerate(images):
         with mp.Pool(10) as p:
