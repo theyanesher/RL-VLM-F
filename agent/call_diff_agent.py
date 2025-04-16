@@ -32,7 +32,7 @@ class TrainConfig:
     eval_iter :int = 25 #Number of evaluations when running eval method - default 10
     eval_freq: int = int(2000)  # How often (time steps) we evaluate -default 5000
     n_episodes: int = 5  # How many episodes run during evaluation
-    max_timesteps: int = int(30000)  # Max time steps to run environment - defualt int (1e6)
+    max_timesteps: int = int(10000)  # Max time steps to run environment - defualt int (1e6)
     dataset_dir: str = "/home/theya/RL_VLM_F-exp/datagen/Cartpole/datagen_Cartpole-Expert"  # Where to load dataset
     results_folder: str = "/home/theya/RL-VLM-F/diffusion/drawer_results/"  # Where to save results
     milestone: Optional[int] = None   # Model load file name, "" doesn't load
@@ -153,7 +153,7 @@ def run_diff_policy(config: TrainConfig):
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     
-    dataset = MWDataset(dataset_dir=config.dataset_dir, output_dir=config.results_folder, horizon_length=config.horizon_length)
+    dataset = MWDataset(dataset_dir=config.dataset_dir, output_dir=config.results_folder, horizon_length=config.horizon_length) #dataloader
     policy = DiffusionPolicy(env=env, dataset=dataset,config=config, results_folder=config.results_folder, milestone=config.milestone)# Pass environment to policy
     
     with open(os.path.join(config.results_folder, "config.yaml"), "w") as f:

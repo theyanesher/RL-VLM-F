@@ -500,10 +500,10 @@ class GoalGaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def model_predictions(self, x, t, x_cond, obs, clip_x_start=False, rederive_pred_noise=False):
+    def model_predictions(self, x, t, x_cond, clip_x_start=False, rederive_pred_noise=False):
         # task_embed = self.text_encoder(goal).last_hidden_state
-        model_output = self.model((x, x_cond, obs), t)
-        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
+        model_output = self.model((x, x_cond), t)  # model is unet (def forward(self, x, t):)
+        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity 
 
         if self.objective == 'pred_noise':
             pred_noise = model_output
@@ -526,8 +526,8 @@ class GoalGaussianDiffusion(nn.Module):
 
         return ModelPrediction(pred_noise, x_start)
 
-    def p_mean_variance(self, x, t, x_cond, obs, clip_denoised = False):
-        preds = self.model_predictions(x, t, x_cond, obs)
+    def p_mean_variance(self, x, t, x_cond, clip_denoised = False):
+        preds = self.model_predictions(x, t, x_cond)
         x_start = preds.pred_x_start
 
         if clip_denoised:
@@ -537,16 +537,16 @@ class GoalGaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance, x_start
 
     @torch.no_grad()
-    def p_sample(self, x, t: int, x_cond, obs):
+    def p_sample(self, x, t: int, x_cond):
         b, *_, device = *x.shape, x.device
         batched_times = torch.full((b,), t, device = x.device, dtype = torch.long)
-        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x, batched_times, x_cond, obs, clip_denoised = True)
+        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x, batched_times, x_cond, clip_denoised = True)
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, x_cond, obs, return_all_timesteps=False):
+    def p_sample_loop(self, shape, x_cond, return_all_timesteps=False):
         batch, device = shape[0], self.betas.device
 
         img = torch.randn(shape, device=device)
@@ -556,7 +556,7 @@ class GoalGaussianDiffusion(nn.Module):
 
         for t in reversed(range(0, self.num_timesteps)):
             # self_cond = x_start if self.self_condition else None
-            img, _ = self.p_sample(img, t, x_cond, obs)
+            img, _ = self.p_sample(img, t, x_cond)
             imgs.append(img)
 
         ret = img if not return_all_timesteps else torch.stack(imgs, dim = 1)
@@ -565,7 +565,7 @@ class GoalGaussianDiffusion(nn.Module):
         return ret
 
     @torch.no_grad()
-    def ddim_sample(self, shape, x_cond, obs, return_all_timesteps=False):
+    def ddim_sample(self, shape, x_cond, return_all_timesteps=False):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps = sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
@@ -580,7 +580,7 @@ class GoalGaussianDiffusion(nn.Module):
         for time, time_next in time_pairs:
             time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
             # self_cond = x_start if self.self_condition else None
-            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, x_cond, obs, clip_x_start = False, rederive_pred_noise = True)
+            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, x_cond, clip_x_start = False, rederive_pred_noise = True)
 
             if time_next < 0:
                 img = x_start
@@ -607,13 +607,13 @@ class GoalGaussianDiffusion(nn.Module):
         return ret
 
     @torch.no_grad()
-    def sample(self, x_cond, obs, batch_size = 16, return_all_timesteps = False):
+    def sample(self, x_cond, batch_size = 16, return_all_timesteps = False):
         image_size, channels = self.image_size, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn((batch_size, image_size, channels), x_cond, obs,  return_all_timesteps = return_all_timesteps)
+        return sample_fn((batch_size, image_size, channels), x_cond,  return_all_timesteps = return_all_timesteps)
 
     @torch.no_grad()
-    def interpolate(self, x1, x2, t = None, lam = 0.5):
+    def interpolate(self, x1, x2, t = None, lam = 0.5): #like to generate smooth transition between two images
         b, *_, device = *x1.shape, x1.device
         t = default(t, self.num_timesteps - 1)
 
@@ -649,7 +649,7 @@ class GoalGaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'invalid loss type {self.loss_type}')
 
-    def p_losses(self, x_start, t, x_cond, obs, noise=None):
+    def p_losses(self, x_start, t, x_cond, noise=None):
         b, f, c = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
 
@@ -659,7 +659,7 @@ class GoalGaussianDiffusion(nn.Module):
 
         # predict and take gradient step
 
-        model_out = self.model((x, x_cond, obs), t)
+        model_out = self.model((x, x_cond), t)
 
         if self.objective == 'pred_noise':
             target = noise
@@ -677,13 +677,13 @@ class GoalGaussianDiffusion(nn.Module):
         loss = loss * extract(self.loss_weight, t, loss.shape)
         return loss.mean()
 
-    def forward(self, img, img_cond, obs):
+    def forward(self, img, img_cond):
         b, f, c, device, img_size, = *img.shape, img.device, self.image_size
         assert f == img_size, f'height and width of image must be {img_size}, got({f})'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = self.normalize(img)
-        return self.p_losses(img, t, img_cond, obs)
+        return self.p_losses(img, t, img_cond)
 
 # dataset classes
 
@@ -933,16 +933,16 @@ class Trainer(object):
     #     out_tokens = [F.pad(t, (0, 0, 0, max_len - t.shape[1]), value = 0) for t in out_tokens]
     #     return torch.cat(out_tokens, dim = 0)
 
-    def sample(self, x_conds, obs):
+    def sample(self, x_conds):
         
         device = self.device
         bs = x_conds.shape[0]
         x_conds = x_conds.to(device)
-        obs = obs.to(device)
+        # obs = obs.to(device)
         # tasks = self.encode_batch_text(tasks).to(device)
 
         with self.accelerator.autocast():
-            output = self.ema.ema_model.sample(batch_size=bs, x_cond=x_conds, obs=obs)
+            output = self.ema.ema_model.sample(batch_size=bs, x_cond=x_conds)
         return output
         
 
@@ -976,8 +976,8 @@ class Trainer(object):
                     data = next(self.dl)
                     x = data["action"]
                     x_cond = data["image"]
-                    obs = data["observation"]
-                    x, x_cond , obs= x.to(device), x_cond.to(device), obs.to(device)
+                    # obs = data["observation"] #to_change
+                    x, x_cond = x.to(device), x_cond.to(device)
                     # print(x.shape, x_cond.shape, obs.shape)
                     # exit()
                     # goal_embed = self.encode_batch_text(goal)
@@ -986,7 +986,7 @@ class Trainer(object):
 
 
                     with self.accelerator.autocast():
-                        loss = self.model(x, x_cond, obs)
+                        loss = self.model(x, x_cond)
                         loss = loss / self.gradient_accumulate_every
                         total_loss += loss.item()
 
@@ -1013,6 +1013,20 @@ class Trainer(object):
                     self.ema.update()
                     wandb.log({"loss": total_loss})
                     wandb.log({"loss_scale": scale})
+                    # if "metaworld" in self.config.env:
+                    #     eval_scores, success, mean_obj_to_target = self.eval_actor(
+                    #         device=self.device,
+                    #         n_episodes=self.config.n_episodes,
+                    #         env_name=self.config.env,
+                    #         step=self.step
+                    #     )
+                    # else:
+                    #     eval_scores, success = self.eval_actor(
+                    #         device=self.device,
+                    #         n_episodes=self.config.n_episodes,
+                    #         env_name=self.config.env,
+                    #         step=self.step
+                    #     )
                     if self.step != 0 and self.step % self.save_and_sample_every == 0:
                         self.ema.ema_model.eval()
                         milestone = self.step // self.save_and_sample_every
@@ -1157,9 +1171,9 @@ class Trainer(object):
             while not done:
                 
                 if len(images) > 1:
-                    action = self.act(images[-2 : ], states[-2: ])  # Generate action using both rendered image and low-level obs
+                    action = self.act(images[-2 : ])  # Generate action using both rendered image and low-level obs
                 else:
-                    action = self.act([images[-1], images[-1]], [states[-1], states[-1]])  # First time step condition on the initial state twice
+                    action = self.act([images[-1], images[-1]])  # First time step condition on the initial state twice
                 action = action[0]
                 # try:
                 # First, just get the raw result without unpacking
@@ -1217,33 +1231,33 @@ class Trainer(object):
         else:
             return np.asarray(episode_rewards), success_rate
 
-    def act(self, images, obs):
+    def act(self, images):
         device = self.device
         bs = 1
         
         # Extract the actual observation arrays from the tuples
-        obs_arrays = []
-        for o in obs:
-            # If the observation is a tuple, extract the array part
-            if isinstance(o, tuple) and len(o) > 0:
-                obs_arrays.append(o[0])  # Get the array part
-            else:
-                obs_arrays.append(o)  # Use as is
+        # obs_arrays = []
+        # for o in obs:
+        #     # If the observation is a tuple, extract the array part
+        #     if isinstance(o, tuple) and len(o) > 0:
+        #         obs_arrays.append(o[0])  # Get the array part
+        #     else:
+        #         obs_arrays.append(o)  # Use as is
         
         # Convert image data to tensor
         x_conds = torch.Tensor(np.array([images[0], images[1]])).permute(0, 3, 1, 2).unsqueeze(0).to(device)
         
         # Normalize observations
-        normalized_obs = []
-        for o in obs_arrays:
-            normalized_o = (o - self.obs_mean) / self.obs_std
-            normalized_obs.append(normalized_o)
+        # normalized_obs = []
+        # for o in obs_arrays:
+        #     normalized_o = (o - self.obs_mean) / self.obs_std
+        #     normalized_obs.append(normalized_o)
         
         # Convert to tensor
-        obs_tensor = torch.Tensor(np.array(normalized_obs)).unsqueeze(0).to(device)
+        # obs_tensor = torch.Tensor(np.array(normalized_obs)).unsqueeze(0).to(device)
         
         with self.accelerator.autocast():
-            output = self.model.sample(x_conds, obs_tensor, batch_size=bs)
+            output = self.model.sample(x_conds, batch_size=bs)
         
         output = output.cpu().numpy().squeeze(0)
         output = output * self.actions_std + self.actions_mean

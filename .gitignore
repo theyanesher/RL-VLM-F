@@ -53,6 +53,6 @@ checkpoints/
 wandb/
 offline_rl/
 offline_rl_exp/
-
-
+diffusion-results/
+test_dummy/
 softgym/PyFlex/bindings/build

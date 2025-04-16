@@ -15,7 +15,7 @@ class Unet1D(nn.Module):
         self.unet = Unet1D_diffusion(
             input_dim=action_space,
             local_cond_dim=None,
-            global_cond_dim=512*obs_steps+obs_dim*obs_steps,
+            global_cond_dim=512*obs_steps, # resnet outputs 512 sized feature vectors
             diffusion_step_embed_dim=256,
             down_dims=[256,512,1024],
             kernel_size=3,
@@ -34,7 +34,7 @@ class Unet1D(nn.Module):
         self.obs_features = obs
 
     def forward(self, x, t):
-        action, obs, obs_ = x
+        action, obs = x # here obs being the image and obs_ being the state vector
         
         # task_embed = self.perceiver(task_embed).mean(dim=1)
         # obs.shape = (b, f, c, h, w)
@@ -43,8 +43,9 @@ class Unet1D(nn.Module):
         self.last_obs = obs
         # print("obs_features: ", self.obs_features.shape)
         # print("obs_: ", obs_.shape)
-        obs_ = obs_.reshape(obs_.shape[0],-1)
-        global_cond = torch.cat([self.obs_features, obs_], dim=1)
+        # obs_ = obs_.reshape(obs_.shape[0],-1)
+        # global_cond = torch.cat([self.obs_features, obs_], dim=1)
+        global_cond = self.obs_features
         # print("global_cond: ", global_cond.shape)
         # print("action: ", action.shape)
         # print("t: ", t)

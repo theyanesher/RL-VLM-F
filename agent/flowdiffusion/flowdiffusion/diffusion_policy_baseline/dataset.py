@@ -131,7 +131,7 @@ class MWDataset(Dataset):
 
             # Add actions and observations to the data dict
             data['action'] = torch.Tensor(actions)
-            data['observation'] = torch.Tensor(observations)
+            # data['observation'] = torch.Tensor(observations) 
 
             # Print action and observation shapes for debugging
             
@@ -144,7 +144,7 @@ class MWDataset(Dataset):
             # Load images and check shapes
             print(f"Loading image paths: {self.images_path[idx]}")
             print(f"Loaded images shapes: {img1.shape}, {img2.shape}")
-            print(f"Actions shape: {data['action'].shape}, Observations shape: {data['observation'].shape}")
+            print(f"Actions shape: {data['action'].shape}")
 
 
             raise e

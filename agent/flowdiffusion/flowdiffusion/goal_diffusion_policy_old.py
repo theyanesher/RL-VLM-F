@@ -986,7 +986,7 @@ class Trainer(object):
 
 
                     with self.accelerator.autocast():
-                        loss = self.model(x, x_cond, obs)
+                        loss = self.model(x, x_cond, obs) #to_change
                         loss = loss / self.gradient_accumulate_every
                         total_loss += loss.item()
 
@@ -1210,7 +1210,7 @@ class Trainer(object):
 
         with self.accelerator.autocast():
             # output = self.ema.ema_model.sample(batch_size=bs, x_cond=x_conds, obs=obs)
-            output = self.model.sample(x_conds, obs, batch_size=bs)
+            output = self.model.sample(x_conds, obs, batch_size=bs) #to_change
         output = output.cpu().numpy().squeeze(0)
         output = output * self.actions_std + self.actions_mean
         # print("output : ", output.shape)
