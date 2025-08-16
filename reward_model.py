@@ -374,14 +374,14 @@ class RewardModel:
     def p_hat_member(self, x_1, x_2, member=-1):
         # softmaxing to get the probabilities according to eqn 1
         with torch.no_grad():
-            r_hat1 = self.r_hat_member(x_1, member=member)
+            r_hat1 = self.r_hat_member(x_1, member=member) # predicted trajectory reward
             r_hat2 = self.r_hat_member(x_2, member=member)
             r_hat1 = r_hat1.sum(axis=1)
             r_hat2 = r_hat2.sum(axis=1)
             r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
         
         # taking 0 index for probability x_1 > x_2
-        return F.softmax(r_hat, dim=-1)[:,0]
+        return F.softmax(r_hat, dim=-1)[:,0] 
     
     def p_hat_entropy(self, x_1, x_2, member=-1):
         # softmaxing to get the probabilities according to eqn 1
@@ -571,24 +571,26 @@ class RewardModel:
             np.copyto(self.buffer_seg2[self.buffer_index:next_index], sa_t_2)
             np.copyto(self.buffer_label[self.buffer_index:next_index], labels)
             self.buffer_index = next_index
-            
+
+    # sa_t_1 is list of state-action pairs and r_t_1 is list of ground-truth rewards for these        
     def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1=None, img_t_2=None):
-        sum_r_t_1 = np.sum(r_t_1, axis=1)
+        sum_r_t_1 = np.sum(r_t_1, axis=1) # we're processing multiple trajectory pairs in a batch.
         sum_r_t_2 = np.sum(r_t_2, axis=1)
         
         # skip the query
         if self.teacher_thres_skip > 0: 
-            max_r_t = np.maximum(sum_r_t_1, sum_r_t_2)
-            max_index = (max_r_t > self.teacher_thres_skip).reshape(-1)
+            max_r_t = np.maximum(sum_r_t_1, sum_r_t_2) # returns a max_r_t of same shape as sum_r_t_1, taking element-wise maximum from sum_r_t_1 and sum_r_t_2
+            max_index = (max_r_t > self.teacher_thres_skip).reshape(-1) # max_index is a boolean mask -> identifies which trajectory pairs are worth labeling
             if sum(max_index) == 0:
                 return None, None, None, None, []
 
+            # apply mask, drop those entries which have very low reward
             sa_t_1 = sa_t_1[max_index]
             sa_t_2 = sa_t_2[max_index]
             r_t_1 = r_t_1[max_index]
             r_t_2 = r_t_2[max_index]
-            sum_r_t_1 = np.sum(r_t_1, axis=1)
-            sum_r_t_2 = np.sum(r_t_2, axis=1)
+            sum_r_t_1 = np.sum(r_t_1, axis=1) # updated reward
+            sum_r_t_2 = np.sum(r_t_2, axis=1) 
         
         # equally preferable
         margin_index = (np.abs(sum_r_t_1 - sum_r_t_2) < self.teacher_thres_equal).reshape(-1)
@@ -600,7 +602,7 @@ class RewardModel:
         for index in range(seg_size-1):
             temp_r_t_1[:,:index+1] *= self.teacher_gamma
             temp_r_t_2[:,:index+1] *= self.teacher_gamma
-        sum_r_t_1 = np.sum(temp_r_t_1, axis=1)
+        sum_r_t_1 = np.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = np.sum(temp_r_t_2, axis=1)
             
         rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
@@ -609,7 +611,7 @@ class RewardModel:
                             torch.Tensor(sum_r_t_2)], axis=-1)
             r_hat = r_hat*self.teacher_beta
             ent = F.softmax(r_hat, dim=-1)[:, 1]
-            labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1)
+            labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
         else:
             labels = rational_labels
         
@@ -622,6 +624,7 @@ class RewardModel:
         # equally preferable
         labels[margin_index] = -1 
         
+        # to be ignored if we have turned off the label
         if self.vlm_label:
             ts = time.time()
             time_string = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
