@@ -39,6 +39,8 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     terminals = []
     info = []
     images_path = []
+    timesteps = []
+    timestep = 0 # initialize timestep
     
     episode_return = 0
     done = False
@@ -68,6 +70,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     while not done:
         images += [image]
         state += [obs]
+        timsteps += [timestep]
         
         rand =  np.random.uniform(low=0.0, high=0.3)
         action = policy.get_action(obs) #this gives us the exact expert policy 
@@ -109,7 +112,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
                 'Rope' not in env_name:
             image = cv2.resize(rgb_image, (image_height, image_width)) # NOTE: resize image here
     
-        
+        timestep += 1
         next_images+=[image]
         actions += [action]
         rewards +=[reward]
@@ -138,7 +141,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
     print("saved sequence")
-    return state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, images_path 
+    return state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, images_path, timesteps 
 
 
 def get_policy(env_name):
@@ -176,6 +179,7 @@ data["rewards"] = []
 data["terminals"] = []
 data["info"] = []
 data["images_path"] = []
+data["timesteps"]  = []
 print("inits done")
 
 os.makedirs(out_path, exist_ok=True)
@@ -208,7 +212,7 @@ for task in tqdm(included_tasks):
         # print(len(obs))
         if "metaworld" in env_name:
             obs = obs[0]
-        state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, images_path = collect_trajectory(obs, env, env_name, ps[task],seed, epsilon=0.1)
+        state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, images_path, timesteps = collect_trajectory(obs, env, env_name, ps[task],seed, epsilon=0.1)
         print("data collected for seed:", seed)
         print(images_path)
         # assert len(images) == len(action_seq) + 1 or len(images) == 502
@@ -221,6 +225,7 @@ for task in tqdm(included_tasks):
         data["terminals"] += terminals
         data["info"] += info
         data["images_path"] += images_path
+        data["timesteps"] += timesteps # this is a dictionary of timesteps arrays for each episode
         # print(data)
     data["observations"] = np.array(data["observations"])
     data["images"] = np.array(data["images"])
@@ -231,6 +236,7 @@ for task in tqdm(included_tasks):
     data["terminals"] = np.array(data["terminals"])
     data["info"] = np.array(data["info"])
     data["images_path"] = np.array(data["images_path"])
+    data["timesteps"] = np.array(data["timesteps"])
     ### save the collected demos
 
     with open(f"{demo_dir}/data.pkl", "wb") as f:
