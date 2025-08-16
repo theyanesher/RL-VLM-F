@@ -135,7 +135,7 @@ class RewardModel:
                  teacher_eps_equal=0,
                  
                 # vlm related params
-                vlm_label=True,
+                vlm_label=False, # turn the flag off to not use vlms, we only want to rely on ground truth labels
                 env_name="CartPole-v1",
                 vlm="gemini_free_form",
                 clip_prompt=None,
@@ -230,7 +230,7 @@ class RewardModel:
         self.label_target = 1 - 2*self.label_margin
 
         # vlm label
-        self.vlm_label = vlm_label
+        self.vlm_label = vlm_label # currently set to false
         self.env_name = env_name
         self.vlm = vlm
         self.clip_prompt = clip_prompt
