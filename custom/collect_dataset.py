@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/home/damiya/RL-VLM-F')
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE as env_dict
 import metaworld
 import metaworld.envs.mujoco.env_dict as _env_dict
@@ -19,7 +21,7 @@ def save_frame(path, frame):
 
 collection_config = {
     "demos": 20,
-    "output_path": "/home/theya/RL/RL-VLM-F/test_dummy",
+    "output_path": "/home/damiya/RL-VLM-F/test_dummy",
     "resolution": (300, 300),
     "safety": 0, ### discard the last {ratio} of the collected videos (preventing failed episodes)
 }
@@ -128,7 +130,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     # print("\n")   
     # print(len(state), len(actions), len(rewards), len(next_state),len(next_images))   
     # print("\n")
-    demo_dir = "/home/theya/RL/RL-VLM-F/test_dummy/button-press-topdown/expert/" + str(seed) + "/"
+    demo_dir = "/home/damiya/RL-VLM-F/test_dummy/button-press-topdown/expert/" + str(seed) + "/"
     os.makedirs(demo_dir, exist_ok=True)
     for i, frame in enumerate(images):
         with mp.Pool(10) as p:
