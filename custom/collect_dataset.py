@@ -72,7 +72,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     while not done:
         images += [image]
         state += [obs]
-        timsteps += [timestep]
+        timesteps += [timestep]
         
         rand =  np.random.uniform(low=0.0, high=0.3)
         action = policy.get_action(obs) #this gives us the exact expert policy 
