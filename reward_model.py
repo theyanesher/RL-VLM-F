@@ -217,7 +217,8 @@ class RewardModel:
         self.best_action = []
         self.large_batch = large_batch
         
-        # new teacher
+        # new teacher, this teacher basically acts like synthetic human and gives preference labels to the offline dataset using ground truth rewards
+        # sort of a replacement for vlm
         self.teacher_beta = teacher_beta
         self.teacher_gamma = teacher_gamma
         self.teacher_eps_mistake = teacher_eps_mistake
