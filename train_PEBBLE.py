@@ -16,8 +16,8 @@ import utils
 import hydra
 from PIL import Image
 
-from vlms.blip_infer_2 import blip2_image_text_matching
-from vlms.clip_infer import clip_infer_score as clip_image_text_matching
+# from vlms.blip_infer_2 import blip2_image_text_matching
+# from vlms.clip_infer import clip_infer_score as clip_image_text_matching
 import cv2
 
 class Workspace(object):
@@ -82,7 +82,7 @@ class Workspace(object):
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 200000, # we cannot afford to store too many images in the replay buffer.
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 20000, # we cannot afford to store too many images in the replay buffer.
             self.device,
             store_image=self.cfg.image_reward,
             image_size=image_height)

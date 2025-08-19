@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/home/theya/RL-VLM-F')
 from metaworld.envs import ALL_V2_ENVIRONMENTS_GOAL_OBSERVABLE as env_dict
 import metaworld
 import metaworld.envs.mujoco.env_dict as _env_dict
@@ -13,17 +15,21 @@ import multiprocessing as mp
 import cv2
 import imageio
 import inspect
+import matplotlib
+matplotlib.use('Agg')  # Forces non-GUI backend
+import matplotlib.pyplot as plt
 def save_frame(path, frame):
     imageio.imwrite(path, frame)
 
 
 collection_config = {
     "demos": 20,
-    "output_path": "/home/theya/RL/RL-VLM-F/test_dummy",
+    "output_path": "/home/theya/RL-VLM-F/test_dummy",
     "resolution": (300, 300),
     "safety": 0, ### discard the last {ratio} of the collected videos (preventing failed episodes)
 }
 
+reward_graph = []
 
 included_tasks = ['button-press-topdown-v2-goal-observable'] #for passing to the call_diff_agent use the env name without the goal observable
 # included_tasks = [t + "-v2-goal-observable" for t in included_tasks]
@@ -70,17 +76,17 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     while not done:
         images += [image]
         state += [obs]
-        timsteps += [timestep]
+        timesteps += [timestep]
         
         rand =  np.random.uniform(low=0.0, high=0.3)
         action = policy.get_action(obs) #this gives us the exact expert policy 
-        # if rand>epsilon:
-        #     action = env.action_space.sample()
-        #     # print(action)
-        # else:
-        #     action = policy.get_action(obs)
-        #     #action_1 = env.action_space.sample()
-        #     #print(action.shape, action_1.shape)
+        if rand>epsilon:
+            action = env.action_space.sample()
+            # print(action)
+        else:
+            action = policy.get_action(obs)
+            #action_1 = env.action_space.sample()
+            #print(action.shape, action_1.shape)
         try:
             try: # for handle stupid gym wrapper change 
                 next_obs, reward, done, extra = env.step(action)
@@ -128,7 +134,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     # print("\n")   
     # print(len(state), len(actions), len(rewards), len(next_state),len(next_images))   
     # print("\n")
-    demo_dir = "/home/theya/RL/RL-VLM-F/test_dummy/button-press-topdown/expert/" + str(seed) + "/"
+    demo_dir = "/home/theya/RL-VLM-F/test_dummy/button-press-topdown/expert/" + str(seed) + "/"
     os.makedirs(demo_dir, exist_ok=True)
     for i, frame in enumerate(images):
         with mp.Pool(10) as p:
@@ -141,6 +147,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
     print("saved sequence")
+    reward_graph.append(rewards)
     return state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, images_path, timesteps 
 
 
@@ -241,6 +248,19 @@ for task in tqdm(included_tasks):
 
     with open(f"{demo_dir}/data.pkl", "wb") as f:
         pickle.dump(data, f)
+
+plt.figure(figsize=(10, 6))
+for i in range (len(reward_graph)):
+    plt.plot(reward_graph[i], marker='o', label=f'Seed {i+1}')
+# plt.plot(reward_graph[0], marker='o')
+plt.xlabel('Steps')
+plt.ylabel('Total Reward')
+plt.legend()
+plt.title('Total Reward per Trajectory')
+plt.grid(True)
+plt.savefig('reward_graph.png')
+
+# plt.show()
 
 print("Completed data collection for all tasks")
       

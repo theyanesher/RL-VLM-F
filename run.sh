@@ -48,7 +48,7 @@ python train_PEBBLE.py \
     seed=0 \
     exp_name=reproduce \
     reward=learn_from_preference \
-    vlm_label=1 \
+    vlm_label=0 \
     vlm=gemini_free_form \
     image_reward=1 \
     reward_batch=40 \
@@ -62,7 +62,7 @@ python train_PEBBLE.py \
     diag_gaussian_actor.params.hidden_dim=256 diag_gaussian_actor.params.hidden_depth=3  \
     feed_type=0 teacher_beta=-1 teacher_gamma=1  teacher_eps_skip=0 teacher_eps_equal=0 \
     num_eval_episodes=1 \
-    cached_label_path=data/cached_labels/Drawer/seed_0/
+    # cached_label_path=data/cached_labels/Drawer/seed_0/
 
 
 ### sweep into

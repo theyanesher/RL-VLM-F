@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import os
 import time
 
-
 import asyncio
 from PIL import Image
 import datetime
@@ -19,7 +18,7 @@ from prompt import (
     gemini_single_query_env_prompts,
     gpt_free_query_env_prompts, gpt_summary_env_prompts,
 )
-from vlms.gemini_infer import gemini_query_2, gemini_query_1
+# from vlms.gemini_infer import gemini_query_2, gemini_query_1
 from conv_net import CNN, fanin_init
 
 device = 'cuda:0'

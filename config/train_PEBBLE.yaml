@@ -75,6 +75,8 @@ prompt: ???
 clip_prompt: "The green drawer is completely opened."
 reward: learn_from_preference
 
+# dataset path
+dataset_path: '/home/theya/RL-VLM-F/test_dummy/button-press-topdown/expert/data.pkl'
 # load pretrained models
 reward_model_load_dir: "None"
 reward_model_score_load_dir: "None"

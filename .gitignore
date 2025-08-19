@@ -49,6 +49,7 @@ figures
 figure/
 data/
 dummy/
+test_dummy/
 checkpoints/
 wandb/
 offline_rl/
