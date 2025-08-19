@@ -54,7 +54,7 @@ env: metaworld_drawer-open-v2
 gradient_update: 1
 
 # vlm label
-vlm_label: 1
+vlm_label: 0 # keep it disabled by default
 vlm: gemini_free_form
 flip_vlm_label: 0
 sum_segment_score: false

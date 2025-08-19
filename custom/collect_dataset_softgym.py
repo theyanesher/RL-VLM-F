@@ -1,17 +1,15 @@
 #!/usr/bin/env python3\
 import sys
-sys.path.append('/home/theya/RL/RL-VLM-F')
+sys.path.append('/home/damiya/RL-VLM-F')
 import numpy as np
 import torch
 import os
-import time
 import pickle as pkl
 
 from logger import Logger
 from replay_buffer import ReplayBuffer
 from reward_model import RewardModel
 from reward_model_score import RewardModelScore
-from collections import deque
 from prompt import clip_env_prompts
 import copy
 import utils
@@ -20,17 +18,9 @@ from PIL import Image
 
 import cv2
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from math import ceil
 from tqdm import tqdm
-# import pyrallis
-from dataclasses import dataclass,asdict
 import os
 import pickle
-import multiprocessing as mp
-import imageio
-import inspect
-import uuid
 
 class DataGen(object):
     def __init__(self, cfg):
@@ -53,7 +43,7 @@ class DataGen(object):
         
         current_file_path = os.path.dirname(os.path.realpath(__file__))
         os.system("cp {}/prompt.py {}/".format(current_file_path, self.logger._log_dir))
-        print("Number of trajs: ", cfg.num_eval_episodes)
+        print("Number of trajectories: ", cfg.num_eval_episodes)
         # make env
         if 'metaworld' in cfg.env:
             self.env = utils.make_metaworld_env(cfg)
@@ -167,6 +157,7 @@ class DataGen(object):
         data["actions"] = []
         data["next_observations"] = []
         data["rewards"] = []
+        data["timesteps"] = []
         data["terminals"] = []
         data["info"] = []
         if collect_images:
@@ -180,11 +171,12 @@ class DataGen(object):
 
         all_ep_infos = []
         for episode in tqdm(range(self.cfg.num_eval_episodes + 10)):
-            state, images, actions, next_state, next_images, rewards, episode_return, terminals, info = self.collect_episode(episode, save_additional=save_additional)
+            state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, timesteps, episode_len = self.collect_episode(episode, save_additional=save_additional)
             data["observations"] += state
             data["actions"] += actions
             data["next_observations"] += next_state
             data["rewards"] += rewards
+            data["timesteps"] += timesteps
             data["terminals"] += terminals
             data["info"] += info
             if collect_images:
@@ -199,6 +191,7 @@ class DataGen(object):
                 data["actions"] = np.array(data["actions"])
                 data["next_observations"] = np.array(data["next_observations"])
                 data["rewards"] = np.array(data["rewards"])
+                data["timesteps"] = np.array(data["timesteps"])
                 data["terminals"] = np.array(data["terminals"])
                 # data["info"] = np.array(data["info"])
                 
@@ -217,6 +210,7 @@ class DataGen(object):
                 data["actions"] = []
                 data["next_observations"] = []
                 data["rewards"] = []
+                data["timesteps"] = []
                 data["terminals"] = []
                 data["info"] = []
                 if collect_images:
@@ -293,6 +287,8 @@ class DataGen(object):
         state = []
         next_state = []
         rewards = []
+        timesteps = []
+        timestep = 0 # initialize timestep for this episode
         terminals = []
         info = []
         epsilon = self.cfg.epsilon
@@ -329,6 +325,8 @@ class DataGen(object):
         while not done:
             state += [obs]
             images += [image]
+            timesteps += [timestep]
+
             with utils.eval_mode(self.agent):
                 rand =  np.random.uniform(low=0.0, high=1.0)
                 if rand<epsilon:
@@ -363,6 +361,7 @@ class DataGen(object):
             rewards +=[reward]
             next_state +=[obs]
             next_images += [image]
+            timestep += 1
             terminals +=[done]
             info += [extra]
             t_idx += 1
@@ -394,10 +393,12 @@ class DataGen(object):
                 os.makedirs(save_reward_path)
             with open(os.path.join(save_reward_path, "step{:07}_episode{:02}.pkl".format(self.step, episode)), "wb") as f:
                 pkl.dump(rewards, f)
-        # print("Episode length: ", len(images))
-        return state, images, actions, next_state, next_images, rewards, episode_reward, terminals, info
+
+        episode_len = len(state) # get current episode length
+        print("Episode length: ", episode_len) 
+        return state, images, actions, next_state, next_images, rewards, episode_reward, terminals, info, timesteps, episode_len
     
-@hydra.main(config_path='/home/theya/RL/RL-VLM-F/config/datagen_softgym.yaml', strict=True)
+@hydra.main(config_path='/home/damiya/RL-VLM-F/config/datagen_softgym.yaml', strict=True)
 def main(cfg):
     print("Loading agent step: ", cfg.agent_load_step)
     print("Loading reward model step: ", cfg.reward_model_load_step)
@@ -409,7 +410,3 @@ def main(cfg):
 
 if __name__ == "__main__":
     main()      
-    
-    
-        
-        
