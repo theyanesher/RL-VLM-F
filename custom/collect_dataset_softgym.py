@@ -4,6 +4,7 @@ sys.path.append('/home/damiya/RL-VLM-F')
 import numpy as np
 import torch
 import os
+import gc  # garbage collection module
 import pickle as pkl
 
 from logger import Logger
@@ -140,7 +141,7 @@ class DataGen(object):
             conv_n_channels=cfg.conv_n_channels,
         )
         
-        if self.cfg.reward_model_load_dir is not  None:
+        if self.cfg.reward_model_load_dir is not None:
             print("loading reward model at {}".format(self.cfg.reward_model_load_dir))
             self.reward_model.load(self.cfg.reward_model_load_dir, cfg.reward_model_load_step) 
                 
@@ -148,29 +149,29 @@ class DataGen(object):
             print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
             self.agent.load(self.cfg.agent_model_load_dir, cfg.agent_load_step) 
         
-        self.collect_data(save_additional=False)
-        
-    def collect_data(self, save_additional=False, collect_images=True, save_interval=250):
+        self.collect_data(save_additional=True)
+
+    def collect_data(self, save_additional=True, collect_images=True, save_interval=1):  # default: save every episode
         print("Epsilon: ", self.cfg.epsilon)
-        data = {}
-        data["observations"] = []
-        data["actions"] = []
-        data["next_observations"] = []
-        data["rewards"] = []
-        data["timesteps"] = []
-        data["terminals"] = []
-        data["info"] = []
-        if collect_images:
-            data["images"] = []
-            # data["next images"] = []
-        else:
-            data["rewards_pred"] = []
         save_gif_dir = os.path.join(self.logger._log_dir, 'eval_gifs')
         if not os.path.exists(save_gif_dir):
             os.makedirs(save_gif_dir)
 
-        all_ep_infos = []
         for episode in tqdm(range(self.cfg.num_eval_episodes + 10)):
+            data = {}
+            data["observations"] = []
+            data["actions"] = []
+            data["next_observations"] = []
+            data["rewards"] = []
+            data["timesteps"] = []
+            data["terminals"] = []
+            data["info"] = []
+            if collect_images:
+                data["images"] = []
+            else:
+                data["rewards_pred"] = []
+
+            # --- Collect one episode ---
             state, images, actions, next_state, next_images, rewards, episode_return, terminals, info, timesteps, episode_len = self.collect_episode(episode, save_additional=save_additional)
             data["observations"] += state
             data["actions"] += actions
@@ -181,47 +182,34 @@ class DataGen(object):
             data["info"] += info
             if collect_images:
                 data["images"] += images
-                # data["next images"] += next_images
             else:
                 rewards_pred = self.relabel_images(next_images)
                 data["rewards_pred"] += rewards_pred
 
-            if episode%save_interval == 0 and episode > 0:
-                data["observations"] = np.array(data["observations"])
-                data["actions"] = np.array(data["actions"])
-                data["next_observations"] = np.array(data["next_observations"])
-                data["rewards"] = np.array(data["rewards"])
-                data["timesteps"] = np.array(data["timesteps"])
-                data["terminals"] = np.array(data["terminals"])
-                # data["info"] = np.array(data["info"])
-                
-                ### save the collected demos
-                if collect_images:
-                    # data["images"] = np.array(data["images"])
-                    # data["next images"] = np.array(data["next images"])
-                    self.relabel(data)
-                else:
-                    data["rewards_pred"] = np.array(data["rewards_pred"])
-                
-                with open(f"{self.logger._log_dir}/data_{episode/save_interval}.pkl", "wb") as f:
-                    pickle.dump(data, f)
-                print("saved data: ", episode/save_interval)
-                data["observations"] = []
-                data["actions"] = []
-                data["next_observations"] = []
-                data["rewards"] = []
-                data["timesteps"] = []
-                data["terminals"] = []
-                data["info"] = []
-                if collect_images:
-                    data["images"] = []
-                    # data["next images"] = []
-                else:
-                    data["rewards_pred"] = []
+            # --- Save and clear per episode ---
+            data["observations"] = np.array(data["observations"])
+            data["actions"] = np.array(data["actions"])
+            data["next_observations"] = np.array(data["next_observations"])
+            data["rewards"] = np.array(data["rewards"])
+            data["timesteps"] = np.array(data["timesteps"])
+            data["terminals"] = np.array(data["terminals"])
+            if collect_images:
+                # data["images"] = np.array(data["images"]) only if fits in memory
+                self.relabel(data)
+            else:
+                data["rewards_pred"] = np.array(data["rewards_pred"])
+
+            with open(f"{self.logger._log_dir}/data_{episode:07d}.pkl", "wb") as f:
+                pickle.dump(data, f)
+            print(f"Saved data: episode {episode}")
+
+            # === Clear to free memory ===
+            del data
+            del state, images, actions, next_state, next_images, rewards, terminals, info, timesteps
+            gc.collect()  # force garbage collection
 
         print("Completed data collection")
         print("Data saved at {}".format(self.logger._log_dir))
-        print("Size of the dataset: ", len(data["observations"]))
     
     def relabel(self, data):
         if not self.cfg.image_reward:
@@ -279,7 +267,7 @@ class DataGen(object):
         return pred
         
 
-    def collect_episode(self, episode, save_additional=False, save_vid=False):
+    def collect_episode(self, episode, save_additional=True, save_vid=False):
         # print("evaluating episode {}".format(episode))
         images = []
         next_images = []

@@ -76,7 +76,7 @@ clip_prompt: "The green drawer is completely opened."
 reward: learn_from_preference
 
 # load pretrained models
-reward_model_load_dir: ""
+reward_model_load_dir: null # set to None
 reward_model_score_load_dir: null
 agent_model_load_dir: null
 reward_model_load_step: 525000
