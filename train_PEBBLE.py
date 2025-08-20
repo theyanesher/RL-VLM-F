@@ -16,8 +16,8 @@ import utils
 import hydra
 from PIL import Image
 
-from vlms.blip_infer_2 import blip2_image_text_matching
-from vlms.clip_infer import clip_infer_score as clip_image_text_matching
+# from vlms.blip_infer_2 import blip2_image_text_matching
+# from vlms.clip_infer import clip_infer_score as clip_image_text_matching
 import cv2
 
 class Workspace(object):
@@ -82,7 +82,7 @@ class Workspace(object):
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 200000, # we cannot afford to store too many images in the replay buffer.
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 20000, # we cannot afford to store too many images in the replay buffer.
             self.device,
             store_image=self.cfg.image_reward,
             image_size=image_height)
@@ -392,7 +392,7 @@ class Workspace(object):
                         frac = self.cfg.num_train_steps / (self.cfg.num_train_steps-self.step +1)
                     else:
                         frac = 1
-                    self.reward_model.change_batch(frac)
+                    self.reward_model.change_batch(frac) # chnages mb size to mb*frac
                     
                     # update margin --> not necessary / will be updated soon
                     new_margin = np.mean(avg_train_true_return) * (self.cfg.segment / self.env._max_episode_steps)
@@ -463,7 +463,7 @@ class Workspace(object):
                 next_obs, reward, terminated, truncated, extra = self.env.step(action)
                 done = terminated or truncated
             ep_info.append(extra)
-
+        
             if self.cfg.vlm_label or self.reward in ['blip2_image_text_matching', 'clip_image_text_matching'] or (self.cfg.image_reward and self.reward not in ["gt_task_reward", "sparse_task_reward"]):
                 if "metaworld" in self.cfg.env:
                     rgb_image = self.env.render()
@@ -488,9 +488,9 @@ class Workspace(object):
 
             if self.reward == 'learn_from_preference' or self.reward == 'learn_from_score':
                 if not self.cfg.image_reward:
-                    self.reward_model.eval()
+                    self.reward_model.eval() # sets all enemble to eval mode
                     reward_hat = self.reward_model.r_hat(np.concatenate([obs, action], axis=-1))
-                    self.reward_model.train()
+                    self.reward_model.train() # sets all enemble to train mode (not the actual training)
                 else:
                     image = rgb_image.transpose(2, 0, 1).astype(np.float32) / 255.0
                     image = image[:, ::self.resize_factor, ::self.resize_factor]

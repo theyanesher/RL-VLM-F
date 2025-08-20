@@ -466,7 +466,8 @@ class RewardModel:
         ensemble_acc = ensemble_acc / total
         return np.mean(ensemble_acc)
     
-    def get_queries(self, mb_size=20):
+    def get_queries(self, mb_size=20): # mb_size - mini-batch size
+        # breakpoint()
         len_traj, max_len = len(self.inputs[0]), len(self.inputs)
         
         if len(self.inputs[-1]) < len_traj:
@@ -501,7 +502,7 @@ class RewardModel:
             img_t_2 = img_t_2.reshape(-1, img_t_2.shape[2], img_t_2.shape[3], img_t_2.shape[4])
 
         # Generate time index 
-        time_index = np.array([list(range(i*len_traj, i*len_traj+self.size_segment)) for i in range(mb_size)])
+        time_index = np.array([list(range(i*len_traj, i*len_traj+self.size_segment)) for i in range(mb_size)]) # is len of traj same for all ?
         if 'Cloth' not in self.env_name:
             random_idx_2 = np.random.choice(len_traj-self.size_segment, size=mb_size, replace=True).reshape(-1,1)
             time_index_2 = time_index + random_idx_2
@@ -529,6 +530,7 @@ class RewardModel:
         r_t_1 = np.take(r_t_1, time_index_1, axis=0) # Batch x size_seg x 1
         sa_t_2 = np.take(sa_t_2, time_index_2, axis=0) # Batch x size_seg x dim of s&a
         r_t_2 = np.take(r_t_2, time_index_2, axis=0) # Batch x size_seg x 1
+
         if self.vlm_label or self.image_reward:
             img_t_1 = np.take(img_t_1, image_time_index_1, axis=0) # Batch x vlm_label x *img_dim
             img_t_2 = np.take(img_t_2, image_time_index_2, axis=0) # Batch x vlm_label x *img_dim
@@ -596,7 +598,7 @@ class RewardModel:
         # equally preferable
         margin_index = (np.abs(sum_r_t_1 - sum_r_t_2) < self.teacher_thres_equal).reshape(-1)
         
-        # perfectly rational
+        # perfectly rational, means not making any mistakes or adding any noise
         seg_size = r_t_1.shape[1]
         temp_r_t_1 = r_t_1.copy()
         temp_r_t_2 = r_t_2.copy()
@@ -626,136 +628,136 @@ class RewardModel:
         labels[margin_index] = -1 
         
         # to be ignored if we have turned off the label
-        if self.vlm_label:
-            ts = time.time()
-            time_string = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
+        # if self.vlm_label:
+        #     ts = time.time()
+        #     time_string = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
 
-            gpt_two_image_paths = []
-            combined_images_list = []
-            useful_indices = []
+        #     gpt_two_image_paths = []
+        #     combined_images_list = []
+        #     useful_indices = []
             
-            file_path = os.path.abspath(__file__)
-            dir_path = os.path.dirname(file_path)
-            save_path = "{}/data/gpt_query_image/{}/{}".format(dir_path, self.env_name, time_string)
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
+        #     file_path = os.path.abspath(__file__)
+        #     dir_path = os.path.dirname(file_path)
+        #     save_path = "{}/data/gpt_query_image/{}/{}".format(dir_path, self.env_name, time_string)
+        #     if not os.path.exists(save_path):
+        #         os.makedirs(save_path)
                 
-            for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-                combined_image = np.concatenate([img1, img2], axis=1)
-                combined_images_list.append(combined_image)
-                combined_image = Image.fromarray(combined_image)
+        #     for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
+        #         combined_image = np.concatenate([img1, img2], axis=1)
+        #         combined_images_list.append(combined_image)
+        #         combined_image = Image.fromarray(combined_image)
                 
-                first_image_save_path = os.path.join(save_path, "first_{:06}.png".format(idx))
-                second_image_save_path = os.path.join(save_path, "second_{:06}.png".format(idx))
-                Image.fromarray(img1).save(first_image_save_path)
-                Image.fromarray(img2).save(second_image_save_path)
-                gpt_two_image_paths.append([first_image_save_path, second_image_save_path])
+        #         first_image_save_path = os.path.join(save_path, "first_{:06}.png".format(idx))
+        #         second_image_save_path = os.path.join(save_path, "second_{:06}.png".format(idx))
+        #         Image.fromarray(img1).save(first_image_save_path)
+        #         Image.fromarray(img2).save(second_image_save_path)
+        #         gpt_two_image_paths.append([first_image_save_path, second_image_save_path])
                 
 
-                diff = np.linalg.norm(img1 - img2)
-                if diff < 1e-3: # ignore the pair if the image is exactly the same
-                    useful_indices.append(0)
-                else:
-                    useful_indices.append(1)
+        #         diff = np.linalg.norm(img1 - img2)
+        #         if diff < 1e-3: # ignore the pair if the image is exactly the same
+        #             useful_indices.append(0)
+        #         else:
+        #             useful_indices.append(1)
                         
-            if self.vlm == 'gpt4v_two_image': 
-                from vlms.gpt4_infer import gpt4v_infer_2
-                vlm_labels = []
-                for idx, (img_path_1, img_path_2) in enumerate(gpt_two_image_paths):
-                    print("querying vlm {}/{}".format(idx, len(gpt_two_image_paths)))
-                    query_prompt = gpt_free_query_env_prompts[self.env_name]
-                    summary_prompt = gpt_summary_env_prompts[self.env_name]
-                    res = gpt4v_infer_2(query_prompt, summary_prompt, img_path_1, img_path_2)
-                    try:
-                        label_res = int(res)
-                    except:
-                        label_res = -1
+        #     if self.vlm == 'gpt4v_two_image': 
+        #         from vlms.gpt4_infer import gpt4v_infer_2
+        #         vlm_labels = []
+        #         for idx, (img_path_1, img_path_2) in enumerate(gpt_two_image_paths):
+        #             print("querying vlm {}/{}".format(idx, len(gpt_two_image_paths)))
+        #             query_prompt = gpt_free_query_env_prompts[self.env_name]
+        #             summary_prompt = gpt_summary_env_prompts[self.env_name]
+        #             res = gpt4v_infer_2(query_prompt, summary_prompt, img_path_1, img_path_2)
+        #             try:
+        #                 label_res = int(res)
+        #             except:
+        #                 label_res = -1
 
-                    vlm_labels.append(label_res)
-                    time.sleep(0.1)
-            elif self.vlm == 'gemini_single_prompt':
-                vlm_labels = []
-                for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-                    res = gemini_query_1([
-                        gemini_free_query_prompt1,
-                        Image.fromarray(img1), 
-                        gemini_free_query_prompt2,
-                        Image.fromarray(img2), 
-                        gemini_single_query_env_prompts[self.env_name],
-                    ])
-                    try:
-                        if "-1" in res:
-                            res = -1
-                        elif "0" in res:
-                            res = 0
-                        elif "1" in res:
-                            res = 1
-                        else:
-                            res = -1
-                    except:
-                        res = -1 
-                    vlm_labels.append(res)
-            elif self.vlm == "gemini_free_form":
-                vlm_labels = []
-                for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-                    res = gemini_query_2(
-                            [
-                                gemini_free_query_prompt1,
-                                Image.fromarray(img1), 
-                                gemini_free_query_prompt2,
-                                Image.fromarray(img2), 
-                                gemini_free_query_env_prompts[self.env_name]
-                    ],
-                                gemini_summary_env_prompts[self.env_name]
-                    )
-                    try:
-                        res = int(res)
-                        if res not in [0, 1, -1]:
-                            res = -1
-                    except:
-                        res = -1
-                    vlm_labels.append(res)   
+        #             vlm_labels.append(label_res)
+        #             time.sleep(0.1)
+        #     elif self.vlm == 'gemini_single_prompt':
+        #         vlm_labels = []
+        #         for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
+        #             res = gemini_query_1([
+        #                 gemini_free_query_prompt1,
+        #                 Image.fromarray(img1), 
+        #                 gemini_free_query_prompt2,
+        #                 Image.fromarray(img2), 
+        #                 gemini_single_query_env_prompts[self.env_name],
+        #             ])
+        #             try:
+        #                 if "-1" in res:
+        #                     res = -1
+        #                 elif "0" in res:
+        #                     res = 0
+        #                 elif "1" in res:
+        #                     res = 1
+        #                 else:
+        #                     res = -1
+        #             except:
+        #                 res = -1 
+        #             vlm_labels.append(res)
+        #     elif self.vlm == "gemini_free_form":
+        #         vlm_labels = []
+        #         for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
+        #             res = gemini_query_2(
+        #                     [
+        #                         gemini_free_query_prompt1,
+        #                         Image.fromarray(img1), 
+        #                         gemini_free_query_prompt2,
+        #                         Image.fromarray(img2), 
+        #                         gemini_free_query_env_prompts[self.env_name]
+        #             ],
+        #                         gemini_summary_env_prompts[self.env_name]
+        #             )
+        #             try:
+        #                 res = int(res)
+        #                 if res not in [0, 1, -1]:
+        #                     res = -1
+        #             except:
+        #                 res = -1
+        #             vlm_labels.append(res)   
 
-            vlm_labels = np.array(vlm_labels).reshape(-1, 1)
-            good_idx = (vlm_labels != -1).flatten()
-            useful_indices = (np.array(useful_indices) == 1).flatten()
-            good_idx = np.logical_and(good_idx, useful_indices)
+        #     vlm_labels = np.array(vlm_labels).reshape(-1, 1)
+        #     good_idx = (vlm_labels != -1).flatten()
+        #     useful_indices = (np.array(useful_indices) == 1).flatten()
+        #     good_idx = np.logical_and(good_idx, useful_indices)
             
-            sa_t_1 = sa_t_1[good_idx]
-            sa_t_2 = sa_t_2[good_idx]
-            r_t_1 = r_t_1[good_idx]
-            r_t_2 = r_t_2[good_idx]
-            rational_labels = rational_labels[good_idx]
-            vlm_labels = vlm_labels[good_idx]
-            combined_images_list = np.array(combined_images_list)[good_idx]
-            img_t_1 = img_t_1[good_idx]
-            img_t_2 = img_t_2[good_idx]
-            if self.flip_vlm_label:
-                vlm_labels = 1 - vlm_labels
+        #     sa_t_1 = sa_t_1[good_idx]
+        #     sa_t_2 = sa_t_2[good_idx]
+        #     r_t_1 = r_t_1[good_idx]
+        #     r_t_2 = r_t_2[good_idx]
+        #     rational_labels = rational_labels[good_idx]
+        #     vlm_labels = vlm_labels[good_idx]
+        #     combined_images_list = np.array(combined_images_list)[good_idx]
+        #     img_t_1 = img_t_1[good_idx]
+        #     img_t_2 = img_t_2[good_idx]
+        #     if self.flip_vlm_label:
+        #         vlm_labels = 1 - vlm_labels
 
-            if self.train_times % self.save_query_interval == 0 or 'gpt4v' in self.vlm:
-                save_path = os.path.join(self.log_dir, "vlm_label_set")
-                if not os.path.exists(save_path):
-                    os.makedirs(save_path)
-                with open("{}/{}.pkl".format(save_path, time_string), "wb") as f:
-                    pkl.dump([combined_images_list, rational_labels, vlm_labels, sa_t_1, sa_t_2, r_t_1, r_t_2], f, protocol=pkl.HIGHEST_PROTOCOL)
+        #     if self.train_times % self.save_query_interval == 0 or 'gpt4v' in self.vlm:
+        #         save_path = os.path.join(self.log_dir, "vlm_label_set")
+        #         if not os.path.exists(save_path):
+        #             os.makedirs(save_path)
+        #         with open("{}/{}.pkl".format(save_path, time_string), "wb") as f:
+        #             pkl.dump([combined_images_list, rational_labels, vlm_labels, sa_t_1, sa_t_2, r_t_1, r_t_2], f, protocol=pkl.HIGHEST_PROTOCOL)
 
-            acc = 0
-            if len(vlm_labels) > 0:
-                acc = np.sum(vlm_labels == rational_labels) / len(vlm_labels)
-                print("vlm label acc: {}".format(acc))
-                print("vlm label acc: {}".format(acc))
-                print("vlm label acc: {}".format(acc))
-            else:
-                print("no vlm label")
-                print("no vlm label")
-                print("no vlm label")
+        #     acc = 0
+        #     if len(vlm_labels) > 0:
+        #         acc = np.sum(vlm_labels == rational_labels) / len(vlm_labels)
+        #         print("vlm label acc: {}".format(acc))
+        #         print("vlm label acc: {}".format(acc))
+        #         print("vlm label acc: {}".format(acc))
+        #     else:
+        #         print("no vlm label")
+        #         print("no vlm label")
+        #         print("no vlm label")
 
-            self.vlm_label_acc = acc
-            if not self.image_reward:
-                return sa_t_1, sa_t_2, r_t_1, r_t_2, labels, vlm_labels
-            else:
-                return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels, vlm_labels
+        #     self.vlm_label_acc = acc
+        #     if not self.image_reward:
+        #         return sa_t_1, sa_t_2, r_t_1, r_t_2, labels, vlm_labels
+        #     else:
+        #         return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels, vlm_labels
 
         if not self.image_reward:
             return sa_t_1, sa_t_2, r_t_1, r_t_2, labels

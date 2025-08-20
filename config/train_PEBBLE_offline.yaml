@@ -7,14 +7,14 @@ experiment: PEBBLE
 # reward learning
 segment: 50
 activation: tanh
-num_seed_steps: 10
-num_unsup_steps: 5
+num_seed_steps: 1000
+num_unsup_steps: 5000
 num_interact: 5000
 reward_lr: 0.0003
 reward_batch: 128
 # reward_update: 200
 reward_update: 5 # for soccer
-feed_type: 0 # unifrom sampling
+feed_type: 0
 reset_update: 100
 topK: 5
 ensemble_size: 3
@@ -73,7 +73,7 @@ cached_label_path: null
 exp_name: gemini_template_1
 prompt: ???
 clip_prompt: "The green drawer is completely opened."
-reward: learn_from_preference
+reward: 'learn_from_preference'
 
 # load pretrained models
 reward_model_load_dir: "None"
@@ -81,6 +81,7 @@ reward_model_score_load_dir: "None"
 agent_model_load_dir: "None"
 mode: train
 save_images: false
+dataset_path: "/home/theya/RL-VLM-F/exp/datagen/metaworld_drawer-open-v2/2025-08-19-21-02-51/vlm_0gemini_free_form_rewardlearn_from_preference_H1024_L2_lr0.0001/teacher_b-1_g1_m0_s0_e0/label_smooth_0.0/schedule_0/datagen_PassWater_init1000_unsup5000_inter5000_maxfeed20000_seg1_acttanh_Rlr0.0003_Rbatch100_Rupdate30_en3_sample0_large_batch10_seed0/data_0000000.pkl"
 
 # hydra configuration
 hydra:

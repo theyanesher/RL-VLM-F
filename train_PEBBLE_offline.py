@@ -16,9 +16,11 @@ import utils
 import hydra
 from PIL import Image
 
-from vlms.blip_infer_2 import blip2_image_text_matching
-from vlms.clip_infer import clip_infer_score as clip_image_text_matching
+# from vlms.blip_infer_2 import blip2_image_text_matching
+# from vlms.clip_infer import clip_infer_score as clip_image_text_matching
 import cv2
+from tqdm import tqdm
+from tqdm import trange
 
 class Offline_Workspace(object):
     def __init__(self, cfg):
@@ -84,7 +86,7 @@ class Offline_Workspace(object):
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 200000, # we cannot afford to store too many images in the replay buffer.
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 20000, # we cannot afford to store too many images in the replay buffer.
             self.device,
             store_image=self.cfg.image_reward,
             image_size=image_height)
@@ -309,48 +311,58 @@ class Offline_Workspace(object):
         model_save_dir = os.path.join(self.work_dir, "models")
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
+            print("Model save directory created at {}".format(model_save_dir))
         
-
         interact_count = 0
         reward_learning_acc = 0
         vlm_acc = 0
         eval_cnt = 0
-        while self.step < self.cfg.num_train_steps:
-            
-            # update reward function
-            if self.total_feedback < self.cfg.max_feedback and (
-                self.reward == 'learn_from_preference' or self.reward == 'learn_from_score'):
-                if interact_count == self.cfg.num_interact:
-                    # update schedule
-                    if self.cfg.reward_schedule == 1:
-                        frac = (self.cfg.num_train_steps-self.step) / self.cfg.num_train_steps
-                        if frac == 0:
-                            frac = 0.01
-                    elif self.cfg.reward_schedule == 2:
-                        frac = self.cfg.num_train_steps / (self.cfg.num_train_steps-self.step +1)
-                    else:
-                        frac = 1
-                    self.reward_model.change_batch(frac)
-                    
-                    # corner case: new total feed > max feed
-                    if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
-                        self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
-                        
-                    reward_learning_acc, vlm_acc = self.learn_reward()
-                    self.reward_model.eval()
-                    self.replay_buffer.relabel_with_predictor(self.reward_model)
-                    self.reward_model.train()
-                    
-            self.agent.update(self.replay_buffer, self.logger, self.step, 1)
-            self.logger.log('train/reward_learning_acc', reward_learning_acc,
-                        self.step)
-            self.logger.log('train/vlm_acc', vlm_acc,self.step)
-            
 
-            if self.step % self.cfg.save_interval == 0 and self.step > 0:
-                self.agent.save(model_save_dir, self.step)
-                self.reward_model.save(model_save_dir, self.step)
-            
+        with trange(self.cfg.num_train_steps, desc="Training Steps") as pbar:
+            for step in pbar:
+                self.step = step
+                # update reward function
+                if self.total_feedback < self.cfg.max_feedback and (
+                    self.reward == 'learn_from_preference' or self.reward == 'learn_from_score'):
+                    if interact_count == self.cfg.num_interact:
+                        if self.cfg.reward_schedule == 1:
+                            frac = (self.cfg.num_train_steps - self.step) / self.cfg.num_train_steps
+                            if frac == 0:
+                                frac = 0.01
+                        elif self.cfg.reward_schedule == 2:
+                            frac = self.cfg.num_train_steps / (self.cfg.num_train_steps - self.step + 1)
+                        else:
+                            frac = 1
+                        self.reward_model.change_batch(frac)
+                        
+                        if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
+                            self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
+                            
+                        reward_learning_acc, vlm_acc = self.learn_reward()
+                        self.reward_model.eval()
+                        self.replay_buffer.relabel_with_predictor(self.reward_model)
+                        self.reward_model.train()
+                        interact_count = 0  # reset interact count after learning
+                
+                self.agent.update(self.replay_buffer, self.logger, self.step, 1)
+
+                # Update tqdm bar with important stats
+                pbar.set_postfix({
+                    'Step': self.step,
+                    'Reward_Acc': f"{reward_learning_acc:.4f}",
+                    'VLM_Acc': f"{vlm_acc:.4f}",
+                    'Total_Feedback': self.total_feedback,
+                    'MB_Size': self.reward_model.mb_size
+                })
+
+                if self.step % self.cfg.save_interval == 0 and self.step > 0:
+                    print("Aaahn Vaazhtukkal Vaazhthukkal!! Step: {}".format(self.step))
+                    self.agent.save(model_save_dir, self.step)
+                    self.reward_model.save(model_save_dir, self.step)
+
+                self.step += 1
+                interact_count += 1
+
         self.agent.save(model_save_dir, self.step)
         self.reward_model.save(model_save_dir, self.step)
     
@@ -392,12 +404,12 @@ class Offline_Workspace(object):
             else:
                 self.replay_buffer.add(obs, action, reward_hat, 
                     next_obs, done, done)
-                
         print("Dataset loaded to buffer!!")
+        breakpoint()
         
-@hydra.main(config_path='config/train_PEBBLE.yaml', strict=True)
+@hydra.main(config_path='config/train_PEBBLE_offline.yaml', strict=True)
 def main(cfg):
-    workspace = Workspace(cfg)
+    workspace = Offline_Workspace(cfg)
     print("Save interval :", cfg.save_interval)
     if cfg.mode == 'eval':
         workspace.evaluate(save_additional=cfg.save_images)
