@@ -15,6 +15,9 @@ from prompt import clip_env_prompts
 import utils
 import hydra
 from PIL import Image
+from offline_dataset import OfflineDataset
+from torch.utils.data import DataLoader
+import numpy as np
 
 # from vlms.blip_infer_2 import blip2_image_text_matching
 # from vlms.clip_infer import clip_infer_score as clip_image_text_matching
@@ -30,6 +33,7 @@ class Offline_Workspace(object):
         self.cfg = cfg
         self.cfg.prompt = clip_env_prompts[cfg.env]
         self.cfg.clip_prompt = clip_env_prompts[cfg.env]
+        self.data_path = cfg.dataset_path
         self.reward = self.cfg.reward # what types of reward to use
         self.logger = Logger(
             self.work_dir,
@@ -37,11 +41,18 @@ class Offline_Workspace(object):
             log_frequency=cfg.log_frequency,
             agent=cfg.agent.name)
         
+        self.dataset_loader = DataLoader(
+            OfflineDataset(self.data_path),
+            batch_size=self.cfg.dataloader_batch_size,  # e.g., 8 or 16
+            shuffle=False,
+            num_workers=4
+        )
+
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
         self.log_success = False
-        with open(cfg.dataset_path, 'rb') as f:
-                self.dataset = pkl.load(f)
+        # with open(cfg.dataset_path, 'rb') as f:
+        #         self.dataset = pkl.load(f)
         
         current_file_path = os.path.dirname(os.path.realpath(__file__))
         os.system("cp {}/prompt.py {}/".format(current_file_path, self.logger._log_dir))
@@ -149,7 +160,7 @@ class Offline_Workspace(object):
             print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
             self.agent.load(self.cfg.agent_model_load_dir, 1000000) 
         
-        self.load_dataset_to_buffer()
+        # self.load_dataset_to_buffer()
         
     def evaluate(self, save_additional=False):
         average_episode_reward = 0
@@ -312,39 +323,64 @@ class Offline_Workspace(object):
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
             print("Model save directory created at {}".format(model_save_dir))
-        
+
         interact_count = 0
         reward_learning_acc = 0
         vlm_acc = 0
         eval_cnt = 0
 
+        dataloader_iter = iter(self.dataset_loader)
+
         with trange(self.cfg.num_train_steps, desc="Training Steps") as pbar:
             for step in pbar:
                 self.step = step
-                # update reward function
-                if self.total_feedback < self.cfg.max_feedback and (
-                    self.reward == 'learn_from_preference' or self.reward == 'learn_from_score'):
-                    if interact_count == self.cfg.num_interact:
-                        if self.cfg.reward_schedule == 1:
-                            frac = (self.cfg.num_train_steps - self.step) / self.cfg.num_train_steps
-                            if frac == 0:
-                                frac = 0.01
-                        elif self.cfg.reward_schedule == 2:
-                            frac = self.cfg.num_train_steps / (self.cfg.num_train_steps - self.step + 1)
-                        else:
-                            frac = 1
-                        self.reward_model.change_batch(frac)
-                        
-                        if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
-                            self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
-                            
-                        reward_learning_acc, vlm_acc = self.learn_reward()
-                        self.reward_model.eval()
-                        self.replay_buffer.relabel_with_predictor(self.reward_model)
-                        self.reward_model.train()
-                        interact_count = 0  # reset interact count after learning
-                
-                self.agent.update(self.replay_buffer, self.logger, self.step, 1)
+
+                # Load a batch of episodes from dataloader
+                if step % self.cfg.data_load_steps == 0:
+                    try:
+                        batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
+                    except StopIteration:
+                        dataloader_iter = iter(self.dataset_loader)
+                        batch = next(dataloader_iter)
+
+                sa_batch, reward_batch = batch
+                sa_batch_np = np.array(sa_batch)
+                reward_batch_np = np.array(reward_batch)
+
+                # Add batch of episodes directly to reward model
+                self.reward_model.add_data_batch(sa_batch_np, reward_batch_np)
+
+                # Update reward function if appropriate
+                # if self.total_feedback < self.cfg.max_feedback and (
+                #     self.reward == 'learn_from_preference' or self.reward == 'learn_from_score'):
+                #     print('entering here')
+                #     if interact_count == self.cfg.num_interact:
+                #         if self.cfg.reward_schedule == 1:
+                #             frac = (self.cfg.num_train_steps - self.step) / self.cfg.num_train_steps
+                #             if frac == 0:
+                #                 frac = 0.01
+                #         elif self.cfg.reward_schedule == 2:
+                #             frac = self.cfg.num_train_steps / (self.cfg.num_train_steps - self.step + 1)
+                #         else:
+                #             frac = 1
+                #         self.reward_model.change_batch(frac)
+
+                #         if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
+                #             self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
+
+                reward_learning_acc, vlm_acc = self.learn_reward()
+                self.reward_model.eval()
+                self.replay_buffer.relabel_with_predictor(self.reward_model)
+                self.reward_model.train()
+                interact_count = 0  # reset interact count after learning
+
+                # if self.step > 0 and self.step % self.cfg.eval_frequency == 0:
+                #     # self.logger.log('eval/episode', episode, self.step)
+                #     self.evaluate()
+                #     eval_cnt += 1
+
+                # Update agent with replay buffer as usual
+                # self.agent.update(self.replay_buffer, self.logger, self.step, 1)
 
                 # Update tqdm bar with important stats
                 pbar.set_postfix({
@@ -357,7 +393,7 @@ class Offline_Workspace(object):
 
                 if self.step % self.cfg.save_interval == 0 and self.step > 0:
                     print("Aaahn Vaazhtukkal Vaazhthukkal!! Step: {}".format(self.step))
-                    self.agent.save(model_save_dir, self.step)
+                    # self.agent.save(model_save_dir, self.step)
                     self.reward_model.save(model_save_dir, self.step)
 
                 self.step += 1

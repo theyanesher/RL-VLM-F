@@ -469,6 +469,7 @@ class RewardModel:
     def get_queries(self, mb_size=20): # mb_size - mini-batch size
         # breakpoint()
         len_traj, max_len = len(self.inputs[0]), len(self.inputs)
+        # breakpoint()
         
         if len(self.inputs[-1]) < len_traj:
             max_len = max_len - 1
@@ -497,6 +498,9 @@ class RewardModel:
         r_t_1 = r_t_1.reshape(-1, r_t_1.shape[-1]) # (Batch x T) x 1
         sa_t_2 = sa_t_2.reshape(-1, sa_t_2.shape[-1]) # (Batch x T) x dim of s&a
         r_t_2 = r_t_2.reshape(-1, r_t_2.shape[-1]) # (Batch x T) x 1
+        if r_t_1.shape[-1] > 1:
+            r_t_1 = r_t_1.reshape(-1, 1) # (Batch x T) x 1
+            r_t_2 = r_t_2.reshape(-1, 1) # (Batch x T) x 1
         if self.vlm_label or self.image_reward:
             img_t_1 = img_t_1.reshape(-1, img_t_1.shape[2], img_t_1.shape[3], img_t_1.shape[4])
             img_t_2 = img_t_2.reshape(-1, img_t_2.shape[2], img_t_2.shape[3], img_t_2.shape[4])
@@ -525,7 +529,7 @@ class RewardModel:
             else:
                 image_time_index_2 = image_time_index
                 image_time_index_1 = image_time_index
-
+        # breakpoint()
         sa_t_1 = np.take(sa_t_1, time_index_1, axis=0) # Batch x size_seg x dim of s&a
         r_t_1 = np.take(r_t_1, time_index_1, axis=0) # Batch x size_seg x 1
         sa_t_2 = np.take(sa_t_2, time_index_2, axis=0) # Batch x size_seg x dim of s&a
