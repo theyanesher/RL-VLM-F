@@ -81,9 +81,11 @@ reward_model_score_load_dir: "None"
 agent_model_load_dir: "None"
 mode: train
 save_images: false
-dataset_path: "/home/theya/RL-VLM-F/exp/datagen/metaworld_drawer-open-v2/2025-08-19-21-02-51/vlm_0gemini_free_form_rewardlearn_from_preference_H1024_L2_lr0.0001/teacher_b-1_g1_m0_s0_e0/label_smooth_0.0/schedule_0/datagen_PassWater_init1000_unsup5000_inter5000_maxfeed20000_seg1_acttanh_Rlr0.0003_Rbatch100_Rupdate30_en3_sample0_large_batch10_seed0/"
-dataloader_batch_size: 50
-data_load_steps: 400
+dataset_path: "/home/theya/RL-VLM-F/exp/datagen/metaworld_drawer-open-v2/2025-08-23-01-28-22/vlm_0gemini_free_form_rewardlearn_from_preference_H1024_L2_lr0.0001/teacher_b-1_g1_m0_s0_e0/label_smooth_0.0/schedule_0/datagen_PassWater_init1000_unsup5000_inter5000_maxfeed20000_seg1_acttanh_Rlr0.0003_Rbatch100_Rupdate30_en3_sample0_large_batch10_seed0/"
+dataloader_batch_size: 40
+data_load_steps: 4
+# reward_model_load_dir: "exp/reproduce/metaworld_drawer-open-v2/2025-08-21-15-49-44/vlm_0gemini_free_form_rewardlearn_from_preference_H256_L3_lr0.0003/teacher_b-1_g1_m0_s0_e0/label_smooth_0.0/schedule_0/PEBBLE_init1000_unsup9000_inter4000_maxfeed20000_seg1_acttanh_Rlr0.0003_Rbatch20_Rupdate10_en3_sample0_large_batch10_seed0/models"
+
 # hydra configuration
 hydra:
     name: ${env}

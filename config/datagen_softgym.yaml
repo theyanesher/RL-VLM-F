@@ -61,7 +61,7 @@ sum_segment_score: false
 collect_data_interval: 0
 max_image_difference: 0
 use_first_and_last: 0
-image_reward: 1
+image_reward: 0
 resnet: 0 # default
 conv_kernel_sizes: [5, 3, 3, 3] # default
 conv_n_channels: [16, 32, 64, 128] # default

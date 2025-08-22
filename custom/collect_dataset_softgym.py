@@ -1,6 +1,6 @@
 #!/usr/bin/env python3\
 import sys
-sys.path.append('/home/damiya/RL-VLM-F')
+sys.path.append('/home/theya/RL-VLM-F')
 import numpy as np
 import torch
 import os
@@ -375,18 +375,18 @@ class DataGen(object):
             for i, image in enumerate(images):
                 save_image_path = os.path.join(save_image_dir, 'step{:07}_episode{:02}_{}.png'.format(self.step, episode, i))
                 image = Image.fromarray(image)
-                image.save(save_image_path)
+                # image.save(save_image_path)
             save_reward_path = os.path.join(self.logger._log_dir, "eval_reward")
             if not os.path.exists(save_reward_path):
                 os.makedirs(save_reward_path)
-            with open(os.path.join(save_reward_path, "step{:07}_episode{:02}.pkl".format(self.step, episode)), "wb") as f:
-                pkl.dump(rewards, f)
+            # with open(os.path.join(save_reward_path, "step{:07}_episode{:02}.pkl".format(self.step, episode)), "wb") as f:
+            #     pkl.dump(rewards, f)
 
         episode_len = len(state) # get current episode length
         print("Episode length: ", episode_len) 
         return state, images, actions, next_state, next_images, rewards, episode_reward, terminals, info, timesteps, episode_len
     
-@hydra.main(config_path='/home/damiya/RL-VLM-F/config/datagen_softgym.yaml', strict=True)
+@hydra.main(config_path='/home/theya/RL-VLM-F/config/datagen_softgym.yaml', strict=True)
 def main(cfg):
     print("Loading agent step: ", cfg.agent_load_step)
     print("Loading reward model step: ", cfg.reward_model_load_step)

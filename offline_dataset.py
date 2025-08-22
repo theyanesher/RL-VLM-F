@@ -18,8 +18,14 @@ class OfflineDataset(Dataset):
         return len(self.file_list)
 
     def __getitem__(self, idx):
-        with open(self.file_list[idx], 'rb') as f:
-            episode = pkl.load(f)
+        # print(f"Loading episode from {self.file_list[idx]}")
+        try:
+            with open(self.file_list[idx], 'rb') as f:
+                episode = pkl.load(f)
+        except Exception as e:
+            print(f"WARNING: Could not load {self.file_list[idx]}: {e}")
+            # Skip to next file
+            return self.__getitem__((idx+1)%len(self.file_list))
         # Optionally convert arrays to torch tensors
         obs = episode['observations']
         actions = episode['actions']

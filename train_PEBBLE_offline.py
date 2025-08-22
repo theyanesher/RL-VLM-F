@@ -18,6 +18,8 @@ from PIL import Image
 from offline_dataset import OfflineDataset
 from torch.utils.data import DataLoader
 import numpy as np
+import wandb
+import time
 
 # from vlms.blip_infer_2 import blip2_image_text_matching
 # from vlms.clip_infer import clip_infer_score as clip_image_text_matching
@@ -43,9 +45,16 @@ class Offline_Workspace(object):
         
         self.dataset_loader = DataLoader(
             OfflineDataset(self.data_path),
-            batch_size=self.cfg.dataloader_batch_size,  # e.g., 8 or 16
-            shuffle=False,
+            batch_size= 4, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
+            shuffle=True,
             num_workers=4
+        )
+
+        wandb.init(
+            project="pebble-offline-rl",  # Or any project name you prefer
+            name=f"{self.cfg.env}-{time.strftime('%Y%m%d-%H%M%S')}",
+            # config=dict(cfg), # Log the entire hydra config
+            job_type="train"
         )
 
         utils.set_seed_everywhere(cfg.seed)
@@ -97,7 +106,7 @@ class Offline_Workspace(object):
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 20000, # we cannot afford to store too many images in the replay buffer.
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 100000, # we cannot afford to store too many images in the replay buffer.
             self.device,
             store_image=self.cfg.image_reward,
             image_size=image_height)
@@ -154,11 +163,14 @@ class Offline_Workspace(object):
         
         if self.cfg.reward_model_load_dir != "None":
             print("loading reward model at {}".format(self.cfg.reward_model_load_dir))
-            self.reward_model.load(self.cfg.reward_model_load_dir, 1000000) 
+            self.reward_model.load(self.cfg.reward_model_load_dir, 1000) 
+            print("reward model loaded!!")
                 
         if self.cfg.agent_model_load_dir != "None":
             print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
-            self.agent.load(self.cfg.agent_model_load_dir, 1000000) 
+            self.agent.load(self.cfg.agent_model_load_dir, 1000) 
+            print("agent loaded!!")
+
         
         # self.load_dataset_to_buffer()
         
@@ -336,12 +348,25 @@ class Offline_Workspace(object):
                 self.step = step
 
                 # Load a batch of episodes from dataloader
-                if step % self.cfg.data_load_steps == 0:
-                    try:
-                        batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
-                    except StopIteration:
-                        dataloader_iter = iter(self.dataset_loader)
-                        batch = next(dataloader_iter)
+                # if step % self.cfg.data_load_steps == 0:
+                if len(self.reward_model.inputs) < self.reward_model.max_size:
+                    while len(self.reward_model.inputs) < self.reward_model.max_size:
+                        # print('loading data', len(self.reward_model.inputs))
+                        try:
+                            batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
+                        except StopIteration:
+                            dataloader_iter = iter(self.dataset_loader)
+                            batch = next(dataloader_iter)
+                        sa_batch, reward_batch = batch
+                        sa_batch_np = np.array(sa_batch)
+                        reward_batch_np = np.array(reward_batch)
+                        self.reward_model.add_data_batch(sa_batch_np, reward_batch_np)
+
+                try:
+                    batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
+                except StopIteration:
+                    dataloader_iter = iter(self.dataset_loader)
+                    batch = next(dataloader_iter)
 
                 sa_batch, reward_batch = batch
                 sa_batch_np = np.array(sa_batch)
@@ -390,6 +415,7 @@ class Offline_Workspace(object):
                     'Total_Feedback': self.total_feedback,
                     'MB_Size': self.reward_model.mb_size
                 })
+                wandb.log({"accuracy": reward_learning_acc, "loss": self.reward_model.train_reward_loss})
 
                 if self.step % self.cfg.save_interval == 0 and self.step > 0:
                     print("Aaahn Vaazhtukkal Vaazhthukkal!! Step: {}".format(self.step))

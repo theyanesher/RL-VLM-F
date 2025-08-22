@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import os
 import time
 
-
 import asyncio
 from PIL import Image
 import datetime
@@ -127,7 +126,7 @@ def compute_smallest_dist(obs, full_obs):
 class RewardModel:
     def __init__(self, ds, da, 
                  ensemble_size=3, lr=3e-4, mb_size = 128, size_segment=1, 
-                 max_size=100, activation='tanh', capacity=5e5,  
+                 max_size=10000, activation='tanh', capacity=5e5,  
                  large_batch=1, label_margin=0.0, 
                  teacher_beta=-1, teacher_gamma=1, 
                  teacher_eps_mistake=0, 
@@ -352,6 +351,10 @@ class RewardModel:
     def add_data_batch(self, obses, rewards):
         num_env = obses.shape[0]
         for index in range(num_env):
+            if len(self.inputs) > self.max_size:
+                # print('removing', self.inputs[0])
+                self.inputs = self.inputs[1:]
+                self.targets = self.targets[1:]
             self.inputs.append(obses[index])
             self.targets.append(rewards[index])
         
@@ -995,6 +998,7 @@ class RewardModel:
     
     def train_reward(self):
         self.train_times += 1
+        # print(len(self.inputs), 'inouts shape')
 
         ensemble_losses = [[] for _ in range(self.de)]
         ensemble_acc = np.array([0 for _ in range(self.de)])
@@ -1039,6 +1043,8 @@ class RewardModel:
 
                 # get logits
                 r_hat1 = self.r_hat_member(sa_t_1, member=member)
+                # breakpoint()
+                # print(max(r_hat1))
                 r_hat2 = self.r_hat_member(sa_t_2, member=member)
                 if not self.image_reward:
                     r_hat1 = r_hat1.sum(axis=1)
@@ -1047,7 +1053,9 @@ class RewardModel:
 
                 # compute loss
                 curr_loss = self.CEloss(r_hat, labels)
+                # breakpoint()
                 loss += curr_loss
+                self.train_reward_loss = loss.item()
                 ensemble_losses[member].append(curr_loss.item())
                 
                 # compute acc
