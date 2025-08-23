@@ -472,7 +472,6 @@ class RewardModel:
     def get_queries(self, mb_size=20): # mb_size - mini-batch size
         # breakpoint()
         len_traj, max_len = len(self.inputs[0]), len(self.inputs)
-        # breakpoint()
         
         if len(self.inputs[-1]) < len_traj:
             max_len = max_len - 1
@@ -610,7 +609,7 @@ class RewardModel:
         temp_r_t_1 = r_t_1.copy()
         temp_r_t_2 = r_t_2.copy()
         for index in range(seg_size-1):
-            temp_r_t_1[:,:index+1] *= self.teacher_gamma
+            temp_r_t_1[:,:index+1] *= self.teacher_gamma # currently gamma is set to 1 in config file, so teacher does not contribute 
             temp_r_t_2[:,:index+1] *= self.teacher_gamma
         sum_r_t_1 = np.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = np.sum(temp_r_t_2, axis=1)
@@ -896,7 +895,7 @@ class RewardModel:
         if not self.vlm_label: 
             # get queries
             if not self.image_reward:
-                sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries(
+                sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries( # sample segments of trajectories
                     mb_size=self.mb_size)
                 # get labels
                 sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(

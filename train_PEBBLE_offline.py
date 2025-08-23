@@ -43,6 +43,7 @@ class Offline_Workspace(object):
             log_frequency=cfg.log_frequency,
             agent=cfg.agent.name)
         
+        # custom dataloader
         self.dataset_loader = DataLoader(
             OfflineDataset(self.data_path),
             batch_size= 4, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
@@ -83,6 +84,7 @@ class Offline_Workspace(object):
             float(self.env.action_space.low.min()),
             float(self.env.action_space.high.max())
         ]
+        # hydra is a configuration management framework
         self.agent = hydra.utils.instantiate(cfg.agent)
         
         image_height = image_width = cfg.image_size
@@ -291,7 +293,7 @@ class Offline_Workspace(object):
             labeled_queries = self.reward_model.uniform_sampling()
         else:
             if self.cfg.feed_type == 0:
-                labeled_queries = self.reward_model.uniform_sampling()
+                labeled_queries = self.reward_model.uniform_sampling() # samples the segments of trajectories
             elif self.cfg.feed_type == 1:
                 labeled_queries = self.reward_model.disagreement_sampling()
             elif self.cfg.feed_type == 2:
@@ -315,7 +317,7 @@ class Offline_Workspace(object):
             for epoch in range(self.cfg.reward_update):
                 if self.cfg.label_margin > 0 or self.cfg.teacher_eps_equal > 0:
                     self.reward_model.train()
-                    train_acc = self.reward_model.train_soft_reward()
+                    train_acc = self.reward_model.train_soft_reward() # considers adding noise while labelling, i.e. flipping labels
                 else:
                     self.reward_model.train()
                     train_acc = self.reward_model.train_reward()
@@ -341,7 +343,7 @@ class Offline_Workspace(object):
         vlm_acc = 0
         eval_cnt = 0
 
-        dataloader_iter = iter(self.dataset_loader)
+        dataloader_iter = iter(self.dataset_loader) # returns as iterator to the dataset loaded using dataloader
 
         with trange(self.cfg.num_train_steps, desc="Training Steps") as pbar:
             for step in pbar:

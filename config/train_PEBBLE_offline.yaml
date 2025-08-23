@@ -14,7 +14,7 @@ reward_lr: 0.0003
 reward_batch: 128
 # reward_update: 200
 reward_update: 5 # for soccer
-feed_type: 0
+feed_type: 0 # for uniform sampling
 reset_update: 100
 topK: 5
 ensemble_size: 3
