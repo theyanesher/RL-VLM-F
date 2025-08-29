@@ -359,10 +359,11 @@ class Offline_Workspace(object):
                         except StopIteration:
                             dataloader_iter = iter(self.dataset_loader)
                             batch = next(dataloader_iter)
-                        sa_batch, reward_batch = batch
+                        sa_batch, reward_batch, tstep_batch = batch
                         sa_batch_np = np.array(sa_batch)
                         reward_batch_np = np.array(reward_batch)
-                        self.reward_model.add_data_batch(sa_batch_np, reward_batch_np)
+                        tstep_batch_np = np.array(tstep_batch)
+                        self.reward_model.add_data_batch(sa_batch_np, reward_batch_np, tstep_batch_np)
 
                 try:
                     batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
@@ -373,9 +374,10 @@ class Offline_Workspace(object):
                 sa_batch, reward_batch = batch
                 sa_batch_np = np.array(sa_batch)
                 reward_batch_np = np.array(reward_batch)
+                tstep_batch_np = np.array(tstep_batch)
 
                 # Add batch of episodes directly to reward model
-                self.reward_model.add_data_batch(sa_batch_np, reward_batch_np)
+                self.reward_model.add_data_batch(sa_batch_np, reward_batch_np, tstep_batch_np)
 
                 # Update reward function if appropriate
                 # if self.total_feedback < self.cfg.max_feedback and (

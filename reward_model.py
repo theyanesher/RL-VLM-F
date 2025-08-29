@@ -197,6 +197,7 @@ class RewardModel:
         self.construct_ensemble()
         self.inputs = []
         self.targets = []
+        self.timesteps = [] # add this to handle timesteps also for each transitions
         self.raw_actions = []
         self.img_inputs = []
         self.mb_size = mb_size
@@ -291,7 +292,7 @@ class RewardModel:
             
         self.opt = torch.optim.Adam(self.paramlst, lr = self.lr)
             
-    def add_data(self, obs, act, rew, done, img=None):
+    def add_data(self, obs, act, rew, done, img=None): # still left to handle tsteps here
         sa_t = np.concatenate([obs, act], axis=-1)
         r_t = rew
         
@@ -348,15 +349,17 @@ class RewardModel:
                 if img is not None:
                     self.img_inputs[-1] = np.concatenate([self.img_inputs[-1], flat_img], axis=0)
                 
-    def add_data_batch(self, obses, rewards):
+    def add_data_batch(self, obses, rewards, tsteps): # done handling tsteps in batch
         num_env = obses.shape[0]
         for index in range(num_env):
             if len(self.inputs) > self.max_size:
                 # print('removing', self.inputs[0])
                 self.inputs = self.inputs[1:]
                 self.targets = self.targets[1:]
+                self.timesteps = self.timesteps[1:]
             self.inputs.append(obses[index])
             self.targets.append(rewards[index])
+            self.timesteps.append(tsteps[index])
         
     def get_rank_probability(self, x_1, x_2):
         # get probability x_1 > x_2
@@ -467,7 +470,7 @@ class RewardModel:
                 ensemble_acc[member] += correct
                 
         ensemble_acc = ensemble_acc / total
-        return np.mean(ensemble_acc)
+        return np.mean(ensemble_acc) # returns the mean of all training accuracies
     
     def get_queries(self, mb_size=20): # mb_size - mini-batch size
         # breakpoint()
@@ -479,6 +482,7 @@ class RewardModel:
         # get train traj
         train_inputs = np.array(self.inputs[:max_len])
         train_targets = np.array(self.targets[:max_len])
+        train_timesteps = np.array(self.timesteps[:max_len]) # get stored timesteps
         if self.vlm_label or self.image_reward:
             train_images = np.array(self.img_inputs[:max_len])
             if 'Cloth' in self.env_name:
@@ -487,22 +491,30 @@ class RewardModel:
         batch_index_2 = np.random.choice(max_len, size=mb_size, replace=True)
         sa_t_2 = train_inputs[batch_index_2] # Batch x T x dim of s&a
         r_t_2 = train_targets[batch_index_2] # Batch x T x 1
+        t_t_2 = train_timesteps[batch_index_2] # Batch x T x 1
         if self.vlm_label or self.image_reward:
             img_t_2 = train_images[batch_index_2] # Batch x T x *img_dim
         
         batch_index_1 = np.random.choice(max_len, size=mb_size, replace=True)
         sa_t_1 = train_inputs[batch_index_1] # Batch x T x dim of s&a
         r_t_1 = train_targets[batch_index_1] # Batch x T x 1
+        t_t_1 = train_timesteps[batch_index_1] # Batch x T x 1
         if self.vlm_label or self.image_reward:
             img_t_1 = train_images[batch_index_1] # Batch x T x *img_dim
                 
         sa_t_1 = sa_t_1.reshape(-1, sa_t_1.shape[-1]) # (Batch x T) x dim of s&a
         r_t_1 = r_t_1.reshape(-1, r_t_1.shape[-1]) # (Batch x T) x 1
+        t_t_1 = t_t_1.reshape(-1,t_t_1.shape[-1]) # (Batch x T) x 1
         sa_t_2 = sa_t_2.reshape(-1, sa_t_2.shape[-1]) # (Batch x T) x dim of s&a
         r_t_2 = r_t_2.reshape(-1, r_t_2.shape[-1]) # (Batch x T) x 1
+        t_t_2 = t_t_2.reshape(-1,t_t_2.shape[-1]) # (Batch x T) x 1
+
         if r_t_1.shape[-1] > 1:
             r_t_1 = r_t_1.reshape(-1, 1) # (Batch x T) x 1
             r_t_2 = r_t_2.reshape(-1, 1) # (Batch x T) x 1
+        if t_t_1.shape[-1] > 1:
+            t_t_1 = t_t_1.reshape(-1, 1) # (Batch x T) x 1
+            t_t_2 = t_t_2.reshape(-1, 1) # (Batch x T) x 1
         if self.vlm_label or self.image_reward:
             img_t_1 = img_t_1.reshape(-1, img_t_1.shape[2], img_t_1.shape[3], img_t_1.shape[4])
             img_t_2 = img_t_2.reshape(-1, img_t_2.shape[2], img_t_2.shape[3], img_t_2.shape[4])
@@ -534,8 +546,10 @@ class RewardModel:
         # breakpoint()
         sa_t_1 = np.take(sa_t_1, time_index_1, axis=0) # Batch x size_seg x dim of s&a
         r_t_1 = np.take(r_t_1, time_index_1, axis=0) # Batch x size_seg x 1
+        t_t_1 = np.take(t_t_1, time_index_1, axis=0) # Batch x size_seg x 1
         sa_t_2 = np.take(sa_t_2, time_index_2, axis=0) # Batch x size_seg x dim of s&a
         r_t_2 = np.take(r_t_2, time_index_2, axis=0) # Batch x size_seg x 1
+        t_t_2 = np.take(t_t_2, time_index_2, axis=0) # Batch x size_seg x 1
 
         if self.vlm_label or self.image_reward:
             img_t_1 = np.take(img_t_1, image_time_index_1, axis=0) # Batch x vlm_label x *img_dim
@@ -549,9 +563,9 @@ class RewardModel:
             img_t_2 = transposed_images.reshape(batch_size, image_height, horizon * image_width, 3) # batch x image_height x (time_horizon * image_width) x 3
         
         if not self.vlm_label and not self.image_reward:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2
         else:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 # return timesteps also
 
     def put_queries(self, sa_t_1, sa_t_2, labels):
         total_sample = sa_t_1.shape[0]
@@ -582,7 +596,7 @@ class RewardModel:
             self.buffer_index = next_index
 
     # sa_t_1 is list of state-action pairs and r_t_1 is list of ground-truth rewards for these        
-    def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1=None, img_t_2=None):
+    def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1=None, img_t_2=None):
         sum_r_t_1 = np.sum(r_t_1, axis=1) # we're processing multiple trajectory pairs in a batch.
         sum_r_t_2 = np.sum(r_t_2, axis=1)
         
@@ -598,6 +612,8 @@ class RewardModel:
             sa_t_2 = sa_t_2[max_index]
             r_t_1 = r_t_1[max_index]
             r_t_2 = r_t_2[max_index]
+            t_t_1 = t_t_1[max_index]
+            t_t_2 = t_t_2[max_index]
             sum_r_t_1 = np.sum(r_t_1, axis=1) # updated reward
             sum_r_t_2 = np.sum(r_t_2, axis=1) 
         
@@ -613,14 +629,26 @@ class RewardModel:
             temp_r_t_2[:,:index+1] *= self.teacher_gamma
         sum_r_t_1 = np.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = np.sum(temp_r_t_2, axis=1)
+
+        avg_t_1 = np.mean(t_t_1, axis=1) # calculate average timestep for segments 
+        avg_t_2 = np.mean(t_t_2, axis=1)
+
+        traj_len = 201 # CHANGE THIS, calculate from somewhere or do something else, needs to be changed
+        alpha1 = avg_t_1 / traj_len # how to find trajectory length?
+        alpha2 = avg_t_2 / traj_len
+
             
         rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
         if self.teacher_beta > 0: # Bradley-Terry rational model
-            r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
-                            torch.Tensor(sum_r_t_2)], axis=-1)
-            r_hat = r_hat*self.teacher_beta
-            ent = F.softmax(r_hat, dim=-1)[:, 1]
-            labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
+            # r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
+            #                 torch.Tensor(sum_r_t_2)], axis=-1)
+            # r_hat = r_hat*self.teacher_beta
+            # ent = F.softmax(r_hat, dim=-1)[:, 1]
+            logits1 = alpha1 * np.exp(sum_r_t_1)
+            logits2 = alpha2 * np.exp(sum_r_t_2)
+            prob_seg2 = logits2 / (logits1 + logits2)          # P(segment-2 preferred)
+            labels = np.random.binomial(1, prob_seg2).reshape(-1, 1)
+            # labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
         else:
             labels = rational_labels
         
