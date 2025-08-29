@@ -27,8 +27,11 @@ class OfflineDataset(Dataset):
             # Skip to next file
             return self.__getitem__((idx+1)%len(self.file_list))
         # Optionally convert arrays to torch tensors
-        obs = episode['observations']
-        actions = episode['actions']
+        # obs = episode['observations']
+        # actions = episode['actions']
         rewards = episode['rewards']
-        sa_t = np.concatenate([obs, actions], axis=-1)
-        return sa_t, rewards
+        images = episode['images']
+        # next_images = episode['next images']
+        traj_len = episode['traj_len']
+        # sa_t = np.concatenate([obs, actions], axis=-1)
+        return images, rewards

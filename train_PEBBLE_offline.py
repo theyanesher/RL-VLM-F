@@ -45,9 +45,9 @@ class Offline_Workspace(object):
         
         self.dataset_loader = DataLoader(
             OfflineDataset(self.data_path),
-            batch_size= 4, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
-            shuffle=True,
-            num_workers=4
+            batch_size= 1, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
+            shuffle=False,
+            num_workers=1
         )
 
         wandb.init(
@@ -106,7 +106,7 @@ class Offline_Workspace(object):
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 100000, # we cannot afford to store too many images in the replay buffer.
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 1000, # we cannot afford to store too many images in the replay buffer.
             self.device,
             store_image=self.cfg.image_reward,
             image_size=image_height)
@@ -139,7 +139,7 @@ class Offline_Workspace(object):
             teacher_eps_mistake=cfg.teacher_eps_mistake, 
             teacher_eps_skip=cfg.teacher_eps_skip, 
             teacher_eps_equal=cfg.teacher_eps_equal,
-            capacity=cfg.max_feedback * 2,
+            capacity=cfg.max_feedback * 2, # change in param if buffer gets full
             
             ### vlm parameters
             vlm_label=cfg.vlm_label,

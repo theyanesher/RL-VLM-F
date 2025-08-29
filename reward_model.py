@@ -126,7 +126,7 @@ def compute_smallest_dist(obs, full_obs):
 class RewardModel:
     def __init__(self, ds, da, 
                  ensemble_size=3, lr=3e-4, mb_size = 128, size_segment=1, 
-                 max_size=10000, activation='tanh', capacity=5e5,  
+                 max_size=3000, activation='tanh', capacity=5e5,  
                  large_batch=1, label_margin=0.0, 
                  teacher_beta=-1, teacher_gamma=1, 
                  teacher_eps_mistake=0, 
@@ -353,7 +353,7 @@ class RewardModel:
         for index in range(num_env):
             if len(self.inputs) > self.max_size:
                 # print('removing', self.inputs[0])
-                self.inputs = self.inputs[1:]
+                self.inputs = self.inputs[1:] 
                 self.targets = self.targets[1:]
             self.inputs.append(obses[index])
             self.targets.append(rewards[index])
