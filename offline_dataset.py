@@ -32,4 +32,4 @@ class OfflineDataset(Dataset):
         rewards = episode['rewards']
         tsteps = episode['timesteps'] # get the timesteps to process in reward model for alpha calculation
         sa_t = np.concatenate([obs, actions], axis=-1)
-        return sa_t, rewards, tsteps # return timesteps array, do changes in train pebble offline too
+        return sa_t, rewards, tsteps # return timesteps array
