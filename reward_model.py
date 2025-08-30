@@ -1039,7 +1039,7 @@ class RewardModel:
 
         ensemble_losses = [[] for _ in range(self.de)]
         ensemble_acc = np.array([0 for _ in range(self.de)])
-        print('ensemble len', ensemble_acc.shape)
+        # print('ensemble len', ensemble_acc.shape)
         
         max_len = self.capacity if self.buffer_full else self.buffer_index
         total_batch_index = []
@@ -1101,8 +1101,9 @@ class RewardModel:
                 _, predicted = torch.max(r_hat.data, 1)
                 correct = (predicted == labels).sum().item()
                 ensemble_acc[member] += correct
+
+                self.wandb.log({f"{member}_loss" : curr_loss.item(), f"{member}_acc" : correct})
             # breakpoint()
-            # self.wandb.log({"reward_p_1_1":ensemble_acc[0], "reward_p_1_2":ensemble_acc[1], "reward_p_1_3":ensemble_acc[2]})
                 
             loss.backward()
             self.opt.step()

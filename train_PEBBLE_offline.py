@@ -171,7 +171,6 @@ class Offline_Workspace(object):
             print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
             self.agent.load(self.cfg.agent_model_load_dir, 1000) 
             print("agent loaded!!")
-
         
         # self.load_dataset_to_buffer()
         
@@ -318,6 +317,7 @@ class Offline_Workspace(object):
                     self.reward_model.train()
                     train_acc = self.reward_model.train_soft_reward()
                 else:
+                    # print('using thiw')
                     self.reward_model.train()
                     train_acc = self.reward_model.train_reward()
                 total_acc = np.mean(train_acc)
@@ -351,7 +351,7 @@ class Offline_Workspace(object):
                 # Load a batch of episodes from dataloader
                 # if step % self.cfg.data_load_steps == 0:
                 # if len(self.reward_model.inputs) < self.reward_model.max_size:
-                while len(self.reward_model.inputs) < self.reward_model.max_size:
+                while len(self.reward_model.inputs) < self.reward_model.mb_size + 1:
                     # print('loading data', len(self.reward_model.inputs))
                     try:
                         batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
@@ -374,7 +374,6 @@ class Offline_Workspace(object):
                 sa_batch_np = np.array(sa_batch)
                 reward_batch_np = np.array(reward_batch)
                 tstep_batch_np = np.array(tstep_batch)
-
 
                 # Add batch of episodes directly to reward model
                 self.reward_model.add_data_batch(sa_batch_np, reward_batch_np, tstep_batch_np, img_batch)
