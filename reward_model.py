@@ -681,12 +681,6 @@ class RewardModel:
             temp_r_t_2[:,:index+1] *= self.teacher_gamma
         sum_r_t_1 = np.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = np.sum(temp_r_t_2, axis=1)
-
-        # avg_t_1 = np.mean(t_t_1, axis=1) # calculate average timestep for segments 
-        # avg_t_2 = np.mean(t_t_2, axis=1)
-
-        # alpha1 = avg_t_1 / traj_len # how to find trajectory length?
-        # alpha2 = avg_t_2 / traj_len
             
         rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
         if self.teacher_beta > 0: # Bradley Terry of the ground truth
