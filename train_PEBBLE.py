@@ -43,6 +43,7 @@ class Workspace(object):
         os.system("cp {}/prompt.py {}/".format(current_file_path, self.logger._log_dir))
         
         # make env
+        
         if 'metaworld' in cfg.env:
             self.env = utils.make_metaworld_env(cfg)
             self.log_success = True

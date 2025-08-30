@@ -50,7 +50,7 @@ class Offline_Workspace(object):
             num_workers=1
         )
 
-        wandb.init(
+        self.wandb = wandb.init(
             project="pebble-offline-rl",  # Or any project name you prefer
             name=f"{self.cfg.env}-{time.strftime('%Y%m%d-%H%M%S')}",
             # config=dict(cfg), # Log the entire hydra config
@@ -106,7 +106,7 @@ class Offline_Workspace(object):
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
-            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 1000, # we cannot afford to store too many images in the replay buffer.
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 2000, # we cannot afford to store too many images in the replay buffer.
             self.device,
             store_image=self.cfg.image_reward,
             image_size=image_height)
@@ -159,6 +159,7 @@ class Offline_Workspace(object):
             conv_kernel_sizes=cfg.conv_kernel_sizes,
             conv_strides=cfg.conv_strides,
             conv_n_channels=cfg.conv_n_channels,
+            wandb = self.wandb
         )
         
         if self.cfg.reward_model_load_dir != "None":
@@ -349,18 +350,19 @@ class Offline_Workspace(object):
 
                 # Load a batch of episodes from dataloader
                 # if step % self.cfg.data_load_steps == 0:
-                if len(self.reward_model.inputs) < self.reward_model.max_size:
-                    while len(self.reward_model.inputs) < self.reward_model.max_size:
-                        # print('loading data', len(self.reward_model.inputs))
-                        try:
-                            batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
-                        except StopIteration:
-                            dataloader_iter = iter(self.dataset_loader)
-                            batch = next(dataloader_iter)
-                        sa_batch, reward_batch = batch
-                        sa_batch_np = np.array(sa_batch)
-                        reward_batch_np = np.array(reward_batch)
-                        self.reward_model.add_data_batch(sa_batch_np, reward_batch_np)
+                # if len(self.reward_model.inputs) < self.reward_model.max_size:
+                while len(self.reward_model.inputs) < self.reward_model.max_size:
+                    # print('loading data', len(self.reward_model.inputs))
+                    try:
+                        batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
+                    except StopIteration:
+                        dataloader_iter = iter(self.dataset_loader)
+                        batch = next(dataloader_iter)
+                    sa_batch, img_batch, reward_batch, tstep_batch = batch
+                    sa_batch_np = np.array(sa_batch)
+                    reward_batch_np = np.array(reward_batch)
+                    tstep_batch_np = np.array(tstep_batch)
+                    self.reward_model.add_data_batch(sa_batch_np, reward_batch_np, tstep_batch_np, img_batch)
 
                 try:
                     batch = next(dataloader_iter)  # batch is a list of (sa, rewards) episode tuples
@@ -368,12 +370,14 @@ class Offline_Workspace(object):
                     dataloader_iter = iter(self.dataset_loader)
                     batch = next(dataloader_iter)
 
-                sa_batch, reward_batch = batch
+                sa_batch, img_batch, reward_batch, tstep_batch = batch
                 sa_batch_np = np.array(sa_batch)
                 reward_batch_np = np.array(reward_batch)
+                tstep_batch_np = np.array(tstep_batch)
+
 
                 # Add batch of episodes directly to reward model
-                self.reward_model.add_data_batch(sa_batch_np, reward_batch_np)
+                self.reward_model.add_data_batch(sa_batch_np, reward_batch_np, tstep_batch_np, img_batch)
 
                 # Update reward function if appropriate
                 # if self.total_feedback < self.cfg.max_feedback and (
@@ -399,6 +403,20 @@ class Offline_Workspace(object):
                 self.reward_model.train()
                 interact_count = 0  # reset interact count after learning
 
+                # if self.reward == 'learn_from_preference' or self.reward == 'learn_from_score':
+                #     if not self.cfg.image_reward:
+                #         print('image reward', self.cfg.image_reward)
+                #         self.reward_model.eval() # sets all enemble to eval mode
+                #         reward_hat = self.reward_model.r_hat(sa_batch)
+                #         self.reward_model.train() # sets all enemble to train mode (not the actual training)
+                #     else:
+                #         image = rgb_image.transpose(2, 0, 1).astype(np.float32) / 255.0
+                #         image = image[:, ::self.resize_factor, ::self.resize_factor]
+                #         image = image.reshape(1, 3, image.shape[1], image.shape[2])
+                #         self.reward_model.eval()
+                #         reward_hat = self.reward_model.r_hat(image)
+                #         self.reward_model.train()
+
                 # if self.step > 0 and self.step % self.cfg.eval_frequency == 0:
                 #     # self.logger.log('eval/episode', episode, self.step)
                 #     self.evaluate()
@@ -415,7 +433,7 @@ class Offline_Workspace(object):
                     'Total_Feedback': self.total_feedback,
                     'MB_Size': self.reward_model.mb_size
                 })
-                wandb.log({"accuracy": reward_learning_acc, "loss": self.reward_model.train_reward_loss})
+                self.wandb.log({"accuracy": reward_learning_acc, "loss": self.reward_model.train_reward_loss})
 
                 if self.step % self.cfg.save_interval == 0 and self.step > 0:
                     print("Aaahn Vaazhtukkal Vaazhthukkal!! Step: {}".format(self.step))
@@ -467,7 +485,7 @@ class Offline_Workspace(object):
                 self.replay_buffer.add(obs, action, reward_hat, 
                     next_obs, done, done)
         print("Dataset loaded to buffer!!")
-        breakpoint()
+        # breakpoint()
         
 @hydra.main(config_path='config/train_PEBBLE_offline.yaml', strict=True)
 def main(cfg):

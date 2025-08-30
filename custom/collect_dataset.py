@@ -15,12 +15,15 @@ import multiprocessing as mp
 import cv2
 import imageio
 import inspect
+import utils
+from gym.wrappers.time_limit import TimeLimit
+from rlkit.envs.wrappers import NormalizedBoxEnv
 def save_frame(path, frame):
     imageio.imwrite(path, frame)
 
 
 collection_config = {
-    "demos": 500,
+    "demos": 300,
     "output_path": "/home/theya/RL-VLM-F/test_dummy",
     "resolution": (300, 300),
     "safety": 0, ### discard the last {ratio} of the collected videos (preventing failed episodes)
@@ -51,8 +54,8 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     print(policy)
     if "metaworld" in env_name:
         print(env_name)
-        print(inspect.getargspec(env.render))
-        env.render_mode = "rgb_array"
+        # print(inspect.getargspec(env.render))
+        # env.render_mode = "rgb_array"
         rgb_image = env.render()
         rgb_image = rgb_image[:, :, :]
         if "drawer" in env_name or "sweep" in env_name:
@@ -71,7 +74,7 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
     
     
     while not done:
-        images += [image]
+        images += [image[::-1,:,:]]
         state += [obs]
         timesteps += [timestep]
         
@@ -123,8 +126,8 @@ def collect_trajectory(init_obs, env, env_name, policy, seed, image_height=300, 
         terminals +=[done]
         info += [extra]
         episode_return += reward
-        if int(extra["success"]) == 1:
-            break
+        # if int(extra["success"]) == 1:
+        #     break
         obs = next_obs
     traj_len = []
     for i in range(len(actions)):
@@ -204,11 +207,15 @@ for task in tqdm(included_tasks):
             env_cls = _env_dict.ALL_V1_ENVIRONMENTS[env_name]
         
         env = env_cls(render_mode='rgb_array')
+        # # if 'metaworld' in cfg.env:
+        # env = utils.make_metaworld_env(cfg)  # creating a metaworld env
         env.camera_name = env_name
-        
+
         env._freeze_rand_vec = False
         env._set_task_called = True
         env.seed(seed=seed)
+        env = TimeLimit(NormalizedBoxEnv(env), 250)
+        # breakpoint()
         #env = env_dict[task](seed=seed)
         
         # print(env.observation_space.shape, env1.observation_space.shape)
@@ -235,19 +242,19 @@ for task in tqdm(included_tasks):
         data["traj_len"] += traj_len
         # print(data)
         # print('data length:', len(data["observations"]), len(data["actions"]), len(data["rewards"]), len(data["next_observations"]))
-        if len(data["observations"]) >= 250:
-            # Prepare the batch to save (first 250 elements from the lists)
+        if len(data["observations"]) >= collection_config["pkl_length"]:
+            # Prepare the batch to save (first collection_config["pkl_length"] elements from the lists)
             data_to_save = {
-                "observations": np.array(data["observations"][:250]),
-                "images": np.array(data["images"][:250]),
-                "actions": np.array(data["actions"][:250]),
-                "next_observations": np.array(data["next_observations"][:250]),
-                "next images": np.array(data["next images"][:250]),
-                "rewards": np.array(data["rewards"][:250]),
-                "terminals": np.array(data["terminals"][:250]),
-                "info": np.array(data["info"][:250]),
-                "timesteps": np.array(data["timesteps"][:250]),
-                "traj_len": np.array(data["traj_len"][:250])
+                "observations": np.array(data["observations"][:collection_config["pkl_length"]]),
+                "images": np.array(data["images"][:collection_config["pkl_length"]]),
+                "actions": np.array(data["actions"][:collection_config["pkl_length"]]),
+                "next_observations": np.array(data["next_observations"][:collection_config["pkl_length"]]),
+                "next images": np.array(data["next images"][:collection_config["pkl_length"]]),
+                "rewards": np.array(data["rewards"][:collection_config["pkl_length"]]),
+                "terminals": np.array(data["terminals"][:collection_config["pkl_length"]]),
+                "info": np.array(data["info"][:collection_config["pkl_length"]]),
+                "timesteps": np.array(data["timesteps"][:collection_config["pkl_length"]]),
+                "traj_len": np.array(data["traj_len"][:collection_config["pkl_length"]])
             }
 
             with open(f"{demo_dir}/data_{count}.pkl", "wb") as f:
@@ -256,16 +263,16 @@ for task in tqdm(included_tasks):
                 pickle.dump(data_to_save, f)
 
             # Remove the saved portion from the *lists*, keeping the remaining data for next batches
-            data["observations"] = data["observations"][250:]
-            data["images"] = data["images"][250:]
-            data["actions"] = data["actions"][250:]
-            data["next_observations"] = data["next_observations"][250:]
-            data["next images"] = data["next images"][250:]
-            data["rewards"] = data["rewards"][250:]
-            data["terminals"] = data["terminals"][250:]
-            data["info"] = data["info"][250:]
-            data["timesteps"]  = data["timesteps"][250:]
-            data["traj_len"] = data["traj_len"][250:]
+            data["observations"] = data["observations"][collection_config["pkl_length"]:]
+            data["images"] = data["images"][collection_config["pkl_length"]:]
+            data["actions"] = data["actions"][collection_config["pkl_length"]:]
+            data["next_observations"] = data["next_observations"][collection_config["pkl_length"]:]
+            data["next images"] = data["next images"][collection_config["pkl_length"]:]
+            data["rewards"] = data["rewards"][collection_config["pkl_length"]:]
+            data["terminals"] = data["terminals"][collection_config["pkl_length"]:]
+            data["info"] = data["info"][collection_config["pkl_length"]:]
+            data["timesteps"]  = data["timesteps"][collection_config["pkl_length"]:]
+            data["traj_len"] = data["traj_len"][collection_config["pkl_length"]:]
             count += 1
 
     ### save the collected demos
