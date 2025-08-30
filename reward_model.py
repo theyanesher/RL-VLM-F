@@ -1084,7 +1084,7 @@ class RewardModel:
                 # breakpoint()
                 # print(max(r_hat1))
                 r_hat2 = self.r_hat_member(sa_t_2, member=member)
-                breakpoint()
+                # breakpoint()
                 if not self.image_reward:
                     r_hat1 = r_hat1.sum(axis=1)
                     r_hat2 = r_hat2.sum(axis=1)
