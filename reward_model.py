@@ -194,6 +194,8 @@ class RewardModel:
             self.resize_factor = resize_factor
 
         self.buffer_label = np.empty((self.capacity, 1), dtype=np.float32)
+        self.buffer_tstep1 = np.empty((self.capacity,self.size_segment, 1),dtype=np.float32) # need to check the shape of this array
+        self.buffer_tstep2 = np.empty((self.capacity,self.size_segment, 1),dtype=np.float32)
         self.buffer_index = 0
         self.buffer_full = False
                 
@@ -265,6 +267,36 @@ class RewardModel:
     def softXEnt_loss(self, input, target):
         logprobs = torch.nn.functional.log_softmax (input, dim = 1)
         return  -(target * logprobs).sum() / input.shape[0]
+    
+    def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2): # modified loss function
+        """
+        Weighted probability loss:
+        p_j = α1_j * exp(r1_j) / (α1_j * exp(r1_j) + α2_j * exp(r2_j))
+        Aggregated across timesteps, then BCE with labels
+        """
+
+        # r_hat_* are (batch × seg_len × 1)
+        # t_t_* are (batch × seg_len × 1)
+
+        alpha1 = t_t_1.float()
+        alpha2 = t_t_2.float()
+
+        exp1 = torch.exp(r_hat_1)
+        exp2 = torch.exp(r_hat_2)
+
+        # per-timestep probability
+        p_t = (alpha1 * exp1) / (alpha1 * exp1 + alpha2 * exp2)
+
+        # mean across whole segment
+        p = p_t.mean(dim=1)  # (batch × 1)
+
+        # label: 0 → seg1 preferred, 1 → seg2 preferred
+        labels = labels.float().view(-1, 1)
+
+        # BCE loss
+        loss = F.binary_cross_entropy(p, labels)
+        return loss
+
     
     def change_batch(self, new_frac):
         self.mb_size = int(self.origin_mb_size*new_frac)
@@ -579,7 +611,7 @@ class RewardModel:
         else:
             return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2
 
-    def put_queries(self, sa_t_1, sa_t_2, labels):
+    def put_queries(self, sa_t_1, sa_t_2, t_t_1, t_t_2, labels):
         total_sample = sa_t_1.shape[0]
         next_index = self.buffer_index + total_sample
         if self.image_reward:
@@ -592,12 +624,16 @@ class RewardModel:
             np.copyto(self.buffer_seg1[self.buffer_index:self.capacity], sa_t_1[:maximum_index])
             np.copyto(self.buffer_seg2[self.buffer_index:self.capacity], sa_t_2[:maximum_index])
             np.copyto(self.buffer_label[self.buffer_index:self.capacity], labels[:maximum_index])
+            np.copyto(self.buffer_label[self.buffer_index:self.capacity], t_t_1[:maximum_index])
+            np.copyto(self.buffer_label[self.buffer_index:self.capacity], t_t_2[:maximum_index])
 
             remain = total_sample - (maximum_index)
             if remain > 0:
                 np.copyto(self.buffer_seg1[0:remain], sa_t_1[maximum_index:])
                 np.copyto(self.buffer_seg2[0:remain], sa_t_2[maximum_index:])
                 np.copyto(self.buffer_label[0:remain], labels[maximum_index:])
+                np.copyto(self.buffer_label[0:remain], t_t_1[:maximum_index])
+                np.copyto(self.buffer_label[0:remain], t_t_2[:maximum_index])
 
             self.buffer_index = remain
         else:
@@ -607,6 +643,8 @@ class RewardModel:
             np.copyto(self.buffer_seg1[self.buffer_index:next_index], sa_t_1)
             np.copyto(self.buffer_seg2[self.buffer_index:next_index], sa_t_2)
             np.copyto(self.buffer_label[self.buffer_index:next_index], labels)
+            np.copyto(self.buffer_seg1[self.buffer_index:next_index], t_t_1)
+            np.copyto(self.buffer_seg2[self.buffer_index:next_index], t_t_2)
             self.buffer_index = next_index
 
     # sa_t_1 is list of state-action pairs and r_t_1 is list of ground-truth rewards for these        
@@ -647,7 +685,6 @@ class RewardModel:
         # avg_t_1 = np.mean(t_t_1, axis=1) # calculate average timestep for segments 
         # avg_t_2 = np.mean(t_t_2, axis=1)
 
-        # traj_len = 250 # CHANGE THIS, calculate from somewhere or do something else, needs to be changed
         # alpha1 = avg_t_1 / traj_len # how to find trajectory length?
         # alpha2 = avg_t_2 / traj_len
             
@@ -804,9 +841,9 @@ class RewardModel:
         #         return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels, vlm_labels
 
         if not self.image_reward:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, labels
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels
         else:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels
     
     def kcenter_sampling(self):
         
@@ -834,11 +871,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
         
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -877,11 +914,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
 
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -921,11 +958,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
 
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -936,22 +973,22 @@ class RewardModel:
                 sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
                 # get labels
-                sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
                     sa_t_1, sa_t_2, r_t_1, r_t_2)
             else:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
-                sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels = self.get_label(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels = self.get_label(
                     sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2)
         else:
             if self.cached_label_path is None:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
                 if not self.image_reward:
-                    sa_t_1, sa_t_2, r_t_1, r_t_2, gt_labels, vlm_labels = self.get_label(
+                    sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
                         sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2)
                 else:
-                    sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, gt_labels, vlm_labels = self.get_label(
+                    sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels = self.get_label(
                         sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2)
             else:
                 if self.read_cache_idx < len(self.all_cached_labels):
@@ -976,13 +1013,13 @@ class RewardModel:
             
         if len(labels) > 0:
             if not self.image_reward:
-                self.put_queries(sa_t_1, sa_t_2, labels)
+                self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
             else:
-                self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], labels)
+                self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], t_t_1, t_t_2, labels)
 
         return len(labels)
     
-    def get_label_from_cached_states(self):
+    def get_label_from_cached_states(self): # maybe need to update this to handle timesteps
         if self.read_cache_idx >= len(self.all_cached_labels):
             return None, None, None, None, None, []
         with open(self.all_cached_labels[self.read_cache_idx], 'rb') as f:
@@ -1004,10 +1041,10 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[top_k_index], sa_t_2[top_k_index]        
         
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)        
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -1025,11 +1062,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[top_k_index], sa_t_2[top_k_index]
         
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(    
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(    
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -1039,7 +1076,7 @@ class RewardModel:
 
         ensemble_losses = [[] for _ in range(self.de)]
         ensemble_acc = np.array([0 for _ in range(self.de)])
-        print('ensemble len', ensemble_acc.shape)
+        # print('ensemble len', ensemble_acc.shape)
         
         max_len = self.capacity if self.buffer_full else self.buffer_index
         total_batch_index = []
@@ -1064,6 +1101,8 @@ class RewardModel:
                 sa_t_1 = self.buffer_seg1[idxs]
                 sa_t_2 = self.buffer_seg2[idxs]
                 labels = self.buffer_label[idxs]
+                t_t_1  = self.buffer_tstep1[idxs]   
+                t_t_2  = self.buffer_tstep2[idxs] 
                 labels = torch.from_numpy(labels.flatten()).long().to(device)
                 
                 if member == 0:
@@ -1080,18 +1119,18 @@ class RewardModel:
                     sa_t_2 = sa_t_2.squeeze(1)
 
                 # get logits
-                r_hat1 = self.r_hat_member(sa_t_1, member=member) # gets the reward output list of each member
+                r_hat1 = self.r_hat_member(sa_t_1, member=member) # gets the reward output list of each member, this is not the ground truth reward, it is the reward from learned reward function
                 # breakpoint()
                 # print(max(r_hat1))
                 r_hat2 = self.r_hat_member(sa_t_2, member=member)
                 # breakpoint()
-                if not self.image_reward:
-                    r_hat1 = r_hat1.sum(axis=1)
-                    r_hat2 = r_hat2.sum(axis=1)
+                # if not self.image_reward:
+                #     r_hat1 = r_hat1.sum(axis=1)
+                #     r_hat2 = r_hat2.sum(axis=1)
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
-                # compute loss
-                curr_loss = self.CEloss(r_hat, labels)
+                # compute loss with modified loss function
+                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2)
                 # breakpoint()
                 loss += curr_loss
                 self.train_reward_loss = loss.item()
