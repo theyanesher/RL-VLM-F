@@ -397,8 +397,8 @@ class Offline_Workspace(object):
                 #             self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
 
                 reward_learning_acc, vlm_acc = self.learn_reward()
-                self.reward_model.eval()
-                self.replay_buffer.relabel_with_predictor(self.reward_model)
+                # self.reward_model.eval()
+                # self.replay_buffer.relabel_with_predictor(self.reward_model)
                 self.reward_model.train()
                 interact_count = 0  # reset interact count after learning
 
