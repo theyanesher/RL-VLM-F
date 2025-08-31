@@ -50,7 +50,7 @@ save_video: false
 seed: 1
 
 # Environment
-env: dog_stand
+env: metaworld_drawer-open-v2
 gradient_update: 1
 
 # vlm label

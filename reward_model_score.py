@@ -14,12 +14,12 @@ import cv2
 
 from scipy.stats import norm
 
-from vlms.gpt4_infer import gpt4v_infer
+# from vlms.gpt4_infer import gpt4v_infer
 from PIL import Image
 import datetime
 import pickle as pkl
-from prompt import gemini_score_prompt_start, gemini_score_env_prompts, gemini_score_summary_env_prompts
-from prompt import gpt_score_query_env_prompts, gpt_score_summary_env_prompts
+# from prompt import gemini_score_prompt_start, gemini_score_env_prompts, gemini_score_summary_env_prompts
+# from prompt import gpt_score_query_env_prompts, gpt_score_summary_env_prompts
 from reward_model import gen_image_net, gen_image_net2
 
 device = 'cuda'
