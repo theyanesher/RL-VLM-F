@@ -274,6 +274,20 @@ class RewardModel:
         logprobs = torch.nn.functional.log_softmax (input, dim = 1)
         return  -(target * logprobs).sum() / input.shape[0]
     
+    def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2): # modified loss function
+        alpha1 = t_t_1.float()
+        alpha2 = t_t_2.float()
+
+        logit1 = (torch.log(alpha1) + r_hat_1).sum(dim=1)
+        logit2 = (torch.log(alpha2) + r_hat_2).sum(dim=1)
+
+        logit = logit1 - logit2   # relative preference logit
+        p = torch.sigmoid(logit)
+
+        labels = labels.float().view(-1, 1)
+        loss = F.binary_cross_entropy(p, labels)
+        return loss
+    
     def change_batch(self, new_frac):
         self.mb_size = int(self.origin_mb_size*new_frac)
     
@@ -1111,6 +1125,8 @@ class RewardModel:
                 idxs = total_batch_index[member][epoch*self.train_batch_size:last_index]
                 sa_t_1 = self.buffer_seg1[idxs]
                 sa_t_2 = self.buffer_seg2[idxs]
+                t_t_1 = self.buffer_tstep1[idxs]
+                t_t_2 = self.buffer_tstep2[idxs]
                 labels = self.buffer_label[idxs]
                 labels = torch.from_numpy(labels.flatten()).long().to(device)
                 
@@ -1136,7 +1152,7 @@ class RewardModel:
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
-                curr_loss = self.CEloss(r_hat, labels)
+                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
                 
