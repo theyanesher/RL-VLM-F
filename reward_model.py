@@ -196,12 +196,15 @@ class RewardModel:
             self.resize_factor = resize_factor
 
         self.buffer_label = np.empty((self.capacity, 1), dtype=np.float32)
+        self.buffer_tstep1 = torch.empty((self.capacity, self.size_segment, 1), dtype=torch.float32, device=device)
+        self.buffer_tstep2 = torch.empty((self.capacity, self.size_segment, 1), dtype=torch.float32, device=device) 
         self.buffer_index = 0
         self.buffer_full = False
                 
         self.construct_ensemble()
         self.inputs = []
         self.targets = []
+        self.timesteps = []
         self.raw_actions = []
         self.img_inputs = []
         self.mb_size = mb_size
@@ -357,11 +360,12 @@ class RewardModel:
                 if img is not None:
                     self.img_inputs[-1] = np.concatenate([self.img_inputs[-1], flat_img], axis=0)
                 
-    def add_data_batch(self, obses, rewards):
+    def add_data_batch(self, obses, rewards, timesteps):
         num_env = obses.shape[0]
         for index in range(num_env):
             self.inputs.append(obses[index])
             self.targets.append(rewards[index])
+            self.timesteps.append(timesteps[index])
         
     def get_rank_probability(self, x_1, x_2):
         # get probability x_1 > x_2
@@ -457,6 +461,8 @@ class RewardModel:
                 
             sa_t_1 = self.buffer_seg1[epoch*batch_size:last_index]
             sa_t_2 = self.buffer_seg2[epoch*batch_size:last_index]
+            t_t_1 = self.buffer_tstep1[epoch*batch_size:last_index]
+            t_t_2 = self.buffer_tstep2[epoch*batch_size:last_index]
             labels = self.buffer_label[epoch*batch_size:last_index]
             labels = torch.from_numpy(labels.flatten()).long().to(device)
             total += labels.size(0)
@@ -482,6 +488,7 @@ class RewardModel:
         
         # get train traj
         train_inputs = np.array(self.inputs[:max_len])
+        train_tsteps = np.array(self.timesteps[:max_len])
         train_targets = np.array(self.targets[:max_len])
         if self.vlm_label or self.image_reward:
             train_images = np.array(self.img_inputs[:max_len])
@@ -490,20 +497,24 @@ class RewardModel:
 
         batch_index_2 = np.random.choice(max_len, size=mb_size, replace=True)
         sa_t_2 = train_inputs[batch_index_2] # Batch x T x dim of s&a
+        t_t_2 = train_tsteps[batch_index_2]
         r_t_2 = train_targets[batch_index_2] # Batch x T x 1
         if self.vlm_label or self.image_reward:
             img_t_2 = train_images[batch_index_2] # Batch x T x *img_dim
         
         batch_index_1 = np.random.choice(max_len, size=mb_size, replace=True)
         sa_t_1 = train_inputs[batch_index_1] # Batch x T x dim of s&a
+        t_t_1 = train_tsteps[batch_index_1]
         r_t_1 = train_targets[batch_index_1] # Batch x T x 1
         if self.vlm_label or self.image_reward:
             img_t_1 = train_images[batch_index_1] # Batch x T x *img_dim
                 
         sa_t_1 = sa_t_1.reshape(-1, sa_t_1.shape[-1]) # (Batch x T) x dim of s&a
         r_t_1 = r_t_1.reshape(-1, r_t_1.shape[-1]) # (Batch x T) x 1
+        t_t_1 = t_t_1.reshape(-1,t_t_1.shape[-1])
         sa_t_2 = sa_t_2.reshape(-1, sa_t_2.shape[-1]) # (Batch x T) x dim of s&a
         r_t_2 = r_t_2.reshape(-1, r_t_2.shape[-1]) # (Batch x T) x 1
+        t_t_2 = t_t_2.reshape(-1,t_t_2.shape[-1])
         if self.vlm_label or self.image_reward:
             img_t_1 = img_t_1.reshape(-1, img_t_1.shape[2], img_t_1.shape[3], img_t_1.shape[4])
             img_t_2 = img_t_2.reshape(-1, img_t_2.shape[2], img_t_2.shape[3], img_t_2.shape[4])
@@ -535,8 +546,10 @@ class RewardModel:
 
         sa_t_1 = np.take(sa_t_1, time_index_1, axis=0) # Batch x size_seg x dim of s&a
         r_t_1 = np.take(r_t_1, time_index_1, axis=0) # Batch x size_seg x 1
+        t_t_1 = np.take(t_t_1, time_index_1, axis=0)
         sa_t_2 = np.take(sa_t_2, time_index_2, axis=0) # Batch x size_seg x dim of s&a
         r_t_2 = np.take(r_t_2, time_index_2, axis=0) # Batch x size_seg x 1
+        t_t_2 = np.take(t_t_2, time_index_2, axis=0)
         if self.vlm_label or self.image_reward:
             img_t_1 = np.take(img_t_1, image_time_index_1, axis=0) # Batch x vlm_label x *img_dim
             img_t_2 = np.take(img_t_2, image_time_index_2, axis=0) # Batch x vlm_label x *img_dim
@@ -549,11 +562,11 @@ class RewardModel:
             img_t_2 = transposed_images.reshape(batch_size, image_height, horizon * image_width, 3) # batch x image_height x (time_horizon * image_width) x 3
         
         if not self.vlm_label and not self.image_reward:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2
         else:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2
 
-    def put_queries(self, sa_t_1, sa_t_2, labels):
+    def put_queries(self, sa_t_1, sa_t_2, t_t_1, t_t_2, labels):
         total_sample = sa_t_1.shape[0]
         next_index = self.buffer_index + total_sample
 
@@ -563,12 +576,16 @@ class RewardModel:
             maximum_index = self.capacity - self.buffer_index
             np.copyto(self.buffer_seg1[self.buffer_index:self.capacity], sa_t_1[:maximum_index])
             np.copyto(self.buffer_seg2[self.buffer_index:self.capacity], sa_t_2[:maximum_index])
+            np.copyto(self.buffer_tstep1[self.buffer_index:self.capacity], t_t_1[:maximum_index])
+            np.copyto(self.buffer_tstep2[self.buffer_index:self.capacity], t_t_2[:maximum_index])
             np.copyto(self.buffer_label[self.buffer_index:self.capacity], labels[:maximum_index])
 
             remain = total_sample - (maximum_index)
             if remain > 0:
                 np.copyto(self.buffer_seg1[0:remain], sa_t_1[maximum_index:])
                 np.copyto(self.buffer_seg2[0:remain], sa_t_2[maximum_index:])
+                np.copyto(self.buffer_tstep1[0:remain], t_t_1[maximum_index:])
+                np.copyto(self.buffer_tstep2[0:remain], t_t_2[maximum_index:])
                 np.copyto(self.buffer_label[0:remain], labels[maximum_index:])
 
             self.buffer_index = remain
@@ -578,10 +595,12 @@ class RewardModel:
                 sa_t_2 = sa_t_2.reshape(sa_t_2.shape[0], 1, sa_t_2.shape[1], sa_t_2.shape[2], sa_t_2.shape[3])
             np.copyto(self.buffer_seg1[self.buffer_index:next_index], sa_t_1)
             np.copyto(self.buffer_seg2[self.buffer_index:next_index], sa_t_2)
+            np.copyto(self.buffer_tstep1[self.buffer_index:next_index], t_t_1)
+            np.copyto(self.buffer_tstep2[self.buffer_index:next_index], t_t_2)
             np.copyto(self.buffer_label[self.buffer_index:next_index], labels)
             self.buffer_index = next_index
             
-    def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1=None, img_t_2=None):
+    def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1=None, img_t_2=None):
         sum_r_t_1 = np.sum(r_t_1, axis=1)
         sum_r_t_2 = np.sum(r_t_2, axis=1)
         
@@ -631,141 +650,141 @@ class RewardModel:
         # equally preferable
         labels[margin_index] = -1 
         
-        if self.vlm_label:
-            ts = time.time()
-            time_string = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
+        # if self.vlm_label:
+        #     ts = time.time()
+        #     time_string = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
 
-            gpt_two_image_paths = []
-            combined_images_list = []
-            useful_indices = []
+        #     gpt_two_image_paths = []
+        #     combined_images_list = []
+        #     useful_indices = []
             
-            file_path = os.path.abspath(__file__)
-            dir_path = os.path.dirname(file_path)
-            save_path = "{}/data/gpt_query_image/{}/{}".format(dir_path, self.env_name, time_string)
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
+        #     file_path = os.path.abspath(__file__)
+        #     dir_path = os.path.dirname(file_path)
+        #     save_path = "{}/data/gpt_query_image/{}/{}".format(dir_path, self.env_name, time_string)
+        #     if not os.path.exists(save_path):
+        #         os.makedirs(save_path)
                 
-            for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-                combined_image = np.concatenate([img1, img2], axis=1)
-                combined_images_list.append(combined_image)
-                combined_image = Image.fromarray(combined_image)
+        #     for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
+        #         combined_image = np.concatenate([img1, img2], axis=1)
+        #         combined_images_list.append(combined_image)
+        #         combined_image = Image.fromarray(combined_image)
                 
-                first_image_save_path = os.path.join(save_path, "first_{:06}.png".format(idx))
-                second_image_save_path = os.path.join(save_path, "second_{:06}.png".format(idx))
-                Image.fromarray(img1).save(first_image_save_path)
-                Image.fromarray(img2).save(second_image_save_path)
-                gpt_two_image_paths.append([first_image_save_path, second_image_save_path])
+        #         first_image_save_path = os.path.join(save_path, "first_{:06}.png".format(idx))
+        #         second_image_save_path = os.path.join(save_path, "second_{:06}.png".format(idx))
+        #         Image.fromarray(img1).save(first_image_save_path)
+        #         Image.fromarray(img2).save(second_image_save_path)
+        #         gpt_two_image_paths.append([first_image_save_path, second_image_save_path])
                 
 
-                diff = np.linalg.norm(img1 - img2)
-                if diff < 1e-3: # ignore the pair if the image is exactly the same
-                    useful_indices.append(0)
-                else:
-                    useful_indices.append(1)
+        #         diff = np.linalg.norm(img1 - img2)
+        #         if diff < 1e-3: # ignore the pair if the image is exactly the same
+        #             useful_indices.append(0)
+        #         else:
+        #             useful_indices.append(1)
                         
-            if self.vlm == 'gpt4v_two_image': 
-                from vlms.gpt4_infer import gpt4v_infer_2
-                vlm_labels = []
-                for idx, (img_path_1, img_path_2) in enumerate(gpt_two_image_paths):
-                    print("querying vlm {}/{}".format(idx, len(gpt_two_image_paths)))
-                    query_prompt = gpt_free_query_env_prompts[self.env_name]
-                    summary_prompt = gpt_summary_env_prompts[self.env_name]
-                    res = gpt4v_infer_2(query_prompt, summary_prompt, img_path_1, img_path_2)
-                    try:
-                        label_res = int(res)
-                    except:
-                        label_res = -1
+        #     if self.vlm == 'gpt4v_two_image': 
+        #         from vlms.gpt4_infer import gpt4v_infer_2
+        #         vlm_labels = []
+        #         for idx, (img_path_1, img_path_2) in enumerate(gpt_two_image_paths):
+        #             print("querying vlm {}/{}".format(idx, len(gpt_two_image_paths)))
+        #             query_prompt = gpt_free_query_env_prompts[self.env_name]
+        #             summary_prompt = gpt_summary_env_prompts[self.env_name]
+        #             res = gpt4v_infer_2(query_prompt, summary_prompt, img_path_1, img_path_2)
+        #             try:
+        #                 label_res = int(res)
+        #             except:
+        #                 label_res = -1
 
-                    vlm_labels.append(label_res)
-                    time.sleep(0.1)
-            elif self.vlm == 'gemini_single_prompt':
-                vlm_labels = []
-                for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-                    res = gemini_query_1([
-                        gemini_free_query_prompt1,
-                        Image.fromarray(img1), 
-                        gemini_free_query_prompt2,
-                        Image.fromarray(img2), 
-                        gemini_single_query_env_prompts[self.env_name],
-                    ])
-                    try:
-                        if "-1" in res:
-                            res = -1
-                        elif "0" in res:
-                            res = 0
-                        elif "1" in res:
-                            res = 1
-                        else:
-                            res = -1
-                    except:
-                        res = -1 
-                    vlm_labels.append(res)
-            elif self.vlm == "gemini_free_form":
-                vlm_labels = []
-                for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-                    res = gemini_query_2(
-                            [
-                                gemini_free_query_prompt1,
-                                Image.fromarray(img1), 
-                                gemini_free_query_prompt2,
-                                Image.fromarray(img2), 
-                                gemini_free_query_env_prompts[self.env_name]
-                    ],
-                                gemini_summary_env_prompts[self.env_name]
-                    )
-                    try:
-                        res = int(res)
-                        if res not in [0, 1, -1]:
-                            res = -1
-                    except:
-                        res = -1
-                    vlm_labels.append(res)   
+        #             vlm_labels.append(label_res)
+        #             time.sleep(0.1)
+        #     elif self.vlm == 'gemini_single_prompt':
+        #         vlm_labels = []
+        #         for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
+        #             res = gemini_query_1([
+        #                 gemini_free_query_prompt1,
+        #                 Image.fromarray(img1), 
+        #                 gemini_free_query_prompt2,
+        #                 Image.fromarray(img2), 
+        #                 gemini_single_query_env_prompts[self.env_name],
+        #             ])
+        #             try:
+        #                 if "-1" in res:
+        #                     res = -1
+        #                 elif "0" in res:
+        #                     res = 0
+        #                 elif "1" in res:
+        #                     res = 1
+        #                 else:
+        #                     res = -1
+        #             except:
+        #                 res = -1 
+        #             vlm_labels.append(res)
+        #     elif self.vlm == "gemini_free_form":
+        #         vlm_labels = []
+        #         for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
+        #             res = gemini_query_2(
+        #                     [
+        #                         gemini_free_query_prompt1,
+        #                         Image.fromarray(img1), 
+        #                         gemini_free_query_prompt2,
+        #                         Image.fromarray(img2), 
+        #                         gemini_free_query_env_prompts[self.env_name]
+        #             ],
+        #                         gemini_summary_env_prompts[self.env_name]
+        #             )
+        #             try:
+        #                 res = int(res)
+        #                 if res not in [0, 1, -1]:
+        #                     res = -1
+        #             except:
+        #                 res = -1
+        #             vlm_labels.append(res)   
 
-            vlm_labels = np.array(vlm_labels).reshape(-1, 1)
-            good_idx = (vlm_labels != -1).flatten()
-            useful_indices = (np.array(useful_indices) == 1).flatten()
-            good_idx = np.logical_and(good_idx, useful_indices)
+        #     vlm_labels = np.array(vlm_labels).reshape(-1, 1)
+        #     good_idx = (vlm_labels != -1).flatten()
+        #     useful_indices = (np.array(useful_indices) == 1).flatten()
+        #     good_idx = np.logical_and(good_idx, useful_indices)
             
-            sa_t_1 = sa_t_1[good_idx]
-            sa_t_2 = sa_t_2[good_idx]
-            r_t_1 = r_t_1[good_idx]
-            r_t_2 = r_t_2[good_idx]
-            rational_labels = rational_labels[good_idx]
-            vlm_labels = vlm_labels[good_idx]
-            combined_images_list = np.array(combined_images_list)[good_idx]
-            img_t_1 = img_t_1[good_idx]
-            img_t_2 = img_t_2[good_idx]
-            if self.flip_vlm_label:
-                vlm_labels = 1 - vlm_labels
+        #     sa_t_1 = sa_t_1[good_idx]
+        #     sa_t_2 = sa_t_2[good_idx]
+        #     r_t_1 = r_t_1[good_idx]
+        #     r_t_2 = r_t_2[good_idx]
+        #     rational_labels = rational_labels[good_idx]
+        #     vlm_labels = vlm_labels[good_idx]
+        #     combined_images_list = np.array(combined_images_list)[good_idx]
+        #     img_t_1 = img_t_1[good_idx]
+        #     img_t_2 = img_t_2[good_idx]
+        #     if self.flip_vlm_label:
+        #         vlm_labels = 1 - vlm_labels
 
-            if self.train_times % self.save_query_interval == 0 or 'gpt4v' in self.vlm:
-                save_path = os.path.join(self.log_dir, "vlm_label_set")
-                if not os.path.exists(save_path):
-                    os.makedirs(save_path)
-                with open("{}/{}.pkl".format(save_path, time_string), "wb") as f:
-                    pkl.dump([combined_images_list, rational_labels, vlm_labels, sa_t_1, sa_t_2, r_t_1, r_t_2], f, protocol=pkl.HIGHEST_PROTOCOL)
+        #     if self.train_times % self.save_query_interval == 0 or 'gpt4v' in self.vlm:
+        #         save_path = os.path.join(self.log_dir, "vlm_label_set")
+        #         if not os.path.exists(save_path):
+        #             os.makedirs(save_path)
+        #         with open("{}/{}.pkl".format(save_path, time_string), "wb") as f:
+        #             pkl.dump([combined_images_list, rational_labels, vlm_labels, sa_t_1, sa_t_2, r_t_1, r_t_2], f, protocol=pkl.HIGHEST_PROTOCOL)
 
-            acc = 0
-            if len(vlm_labels) > 0:
-                acc = np.sum(vlm_labels == rational_labels) / len(vlm_labels)
-                print("vlm label acc: {}".format(acc))
-                print("vlm label acc: {}".format(acc))
-                print("vlm label acc: {}".format(acc))
-            else:
-                print("no vlm label")
-                print("no vlm label")
-                print("no vlm label")
+        #     acc = 0
+        #     if len(vlm_labels) > 0:
+        #         acc = np.sum(vlm_labels == rational_labels) / len(vlm_labels)
+        #         print("vlm label acc: {}".format(acc))
+        #         print("vlm label acc: {}".format(acc))
+        #         print("vlm label acc: {}".format(acc))
+        #     else:
+        #         print("no vlm label")
+        #         print("no vlm label")
+        #         print("no vlm label")
 
-            self.vlm_label_acc = acc
-            if not self.image_reward:
-                return sa_t_1, sa_t_2, r_t_1, r_t_2, labels, vlm_labels
-            else:
-                return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels, vlm_labels
+        #     self.vlm_label_acc = acc
+        #     if not self.image_reward:
+        #         return sa_t_1, sa_t_2, r_t_1, r_t_2, labels, vlm_labels
+        #     else:
+        #         return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels, vlm_labels
 
         if not self.image_reward:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, labels
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels
         else:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels
     
     def kcenter_sampling(self):
         
@@ -793,11 +812,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
         
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -836,11 +855,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
 
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -880,11 +899,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
 
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -892,19 +911,19 @@ class RewardModel:
         if not self.vlm_label: 
             # get queries
             if not self.image_reward:
-                sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
                 # get labels
-                sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
                     sa_t_1, sa_t_2, r_t_1, r_t_2)
             else:
-                sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2 =  self.get_queries(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
-                sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels = self.get_label(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels = self.get_label(
                     sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2)
         else:
             if self.cached_label_path is None:
-                sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2 =  self.get_queries(
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
                 if not self.image_reward:
                     sa_t_1, sa_t_2, r_t_1, r_t_2, gt_labels, vlm_labels = self.get_label(
@@ -1007,9 +1026,9 @@ class RewardModel:
             
         if len(labels) > 0:
             if not self.image_reward:
-                self.put_queries(sa_t_1, sa_t_2, labels)
+                self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
             else:
-                self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], labels)
+                self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], t_t_1, t_t_2, labels)
 
         return len(labels)
     
@@ -1035,10 +1054,10 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[top_k_index], sa_t_2[top_k_index]        
         
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
             sa_t_1, sa_t_2, r_t_1, r_t_2)        
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
@@ -1056,11 +1075,11 @@ class RewardModel:
         r_t_2, sa_t_2 = r_t_2[top_k_index], sa_t_2[top_k_index]
         
         # get labels
-        sa_t_1, sa_t_2, r_t_1, r_t_2, labels = self.get_label(    
+        sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(    
             sa_t_1, sa_t_2, r_t_1, r_t_2)
         
         if len(labels) > 0:
-            self.put_queries(sa_t_1, sa_t_2, labels)
+            self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
         
         return len(labels)
     
