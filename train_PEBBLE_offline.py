@@ -15,6 +15,7 @@ from tqdm import tqdm
 import utils
 import hydra
 from PIL import Image
+import wandb
 
 from vlms.blip_infer_2 import blip2_image_text_matching
 from vlms.clip_infer import clip_infer_score as clip_image_text_matching
@@ -34,6 +35,13 @@ class Offline_Workspace(object):
             save_tb=cfg.log_save_tb,
             log_frequency=cfg.log_frequency,
             agent=cfg.agent.name)
+        
+        self.wandb = wandb.init(
+            project="pebble-offline-rl",  # Or any project name you prefer
+            name=f"{self.cfg.env}-{time.strftime('%Y%m%d-%H%M%S')}",
+            # config=dict(cfg), # Log the entire hydra config
+            job_type="train"
+        )
         
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
@@ -141,6 +149,7 @@ class Offline_Workspace(object):
             conv_kernel_sizes=cfg.conv_kernel_sizes,
             conv_strides=cfg.conv_strides,
             conv_n_channels=cfg.conv_n_channels,
+            wandb=self.wandb
         )
         
         if self.cfg.reward_model_load_dir != "None":
@@ -324,29 +333,30 @@ class Offline_Workspace(object):
             # update reward function
             if self.total_feedback < self.cfg.max_feedback and (
                 self.reward == 'learn_from_preference' or self.reward == 'learn_from_score'):
-                if interact_count == self.cfg.num_interact:
+                # if interact_count == self.cfg.num_interact:
                     # update schedule
-                    if self.cfg.reward_schedule == 1:
-                        frac = (self.cfg.num_train_steps-self.step) / self.cfg.num_train_steps
-                        if frac == 0:
-                            frac = 0.01
-                    elif self.cfg.reward_schedule == 2:
-                        frac = self.cfg.num_train_steps / (self.cfg.num_train_steps-self.step +1)
-                    else:
-                        frac = 1
-                    self.reward_model.change_batch(frac)
+                if self.cfg.reward_schedule == 1:
+                    frac = (self.cfg.num_train_steps-self.step) / self.cfg.num_train_steps
+                    if frac == 0:
+                        frac = 0.01
+                elif self.cfg.reward_schedule == 2:
+                    frac = self.cfg.num_train_steps / (self.cfg.num_train_steps-self.step +1)
+                else:
+                    frac = 1
+                self.reward_model.change_batch(frac)
+                
+                # corner case: new total feed > max feed
+                if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
+                    self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
                     
-                    # corner case: new total feed > max feed
-                    if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
-                        self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
-                        
-                    reward_learning_acc, vlm_acc = self.learn_reward()
-                    print("reward learn", reward_learning_acc)
-                    self.reward_model.eval()
-                    # self.replay_buffer.relabel_with_predictor(self.reward_model)
-                    self.reward_model.train()
-                    interact_count = 0
-                    
+                reward_learning_acc, vlm_acc = self.learn_reward()
+                print("reward learn", reward_learning_acc)
+                self.reward_model.eval()
+                # self.replay_buffer.relabel_with_predictor(self.reward_model)
+                self.reward_model.train()
+                interact_count = 0
+            
+            self.wandb.log({"accuracy": reward_learning_acc, "loss": self.reward_model.train_reward_loss})
             # self.agent.update(self.replay_buffer, self.logger, self.step, 1)
             self.logger.log('train/reward_learning_acc', reward_learning_acc,
                         self.step)
@@ -374,6 +384,7 @@ class Offline_Workspace(object):
             next_obs = self.dataset["next_observations"][i]
             reward = self.dataset["rewards"][i]
             done = self.dataset["terminals"][i]
+            timesteps = self.dataset["timesteps"][i]
             done = float(done)
             if self.reward == 'blip2_image_text_matching':
                 query_image = rgb_image
@@ -394,7 +405,7 @@ class Offline_Workspace(object):
             if self.cfg.image_reward and self.reward not in ["gt_task_reward", "sparse_task_reward"]:
                 # print('here')
                 rgb_image = self.dataset["images"][i]
-                self.reward_model.add_data(obs, action, reward_hat, 
+                self.reward_model.add_data(obs, action, reward_hat, timesteps,
                     done, img=rgb_image[::self.resize_factor, ::self.resize_factor, :])
             else:
                 print('i am in wrong place')

@@ -159,6 +159,7 @@ class RewardModel:
                 conv_kernel_sizes=[5, 3, 3 ,3],
                 conv_n_channels=[16, 32, 64, 128],
                 conv_strides=[3, 2, 2, 2],
+                wandb = None,
                 **kwargs
                 ):
         
@@ -174,6 +175,7 @@ class RewardModel:
         self.max_size = max_size
         self.activation = activation
         self.size_segment = size_segment
+        self.wandb=wandb
         
         self.capacity = int(capacity)
         self.reward_model_layers = reward_model_layers
@@ -317,13 +319,15 @@ class RewardModel:
             
         self.opt = torch.optim.Adam(self.paramlst, lr = self.lr)
             
-    def add_data(self, obs, act, rew, done, img=None):
+    def add_data(self, obs, act, rew, t_t, done, img=None):
         sa_t = np.concatenate([obs, act], axis=-1)
         r_t = rew
-        
+        # breakpoint()
         flat_input = sa_t.reshape(1, self.da+self.ds)
         r_t = np.array(r_t)
+        t_t = np.array(t_t)
         flat_target = r_t.reshape(1, 1)
+        flat_t_t = t_t.reshape(1, 1)
         if img is not None:
             flat_img = img.reshape(1, img.shape[0], img.shape[1], img.shape[2])
 
@@ -331,12 +335,14 @@ class RewardModel:
         if init_data:
             self.inputs.append(flat_input)
             self.targets.append(flat_target)
+            self.timesteps.append(flat_t_t)
             if img is not None:
                 self.img_inputs.append(flat_img)
         elif done:
             if 'Cloth' not in self.env_name:
                 self.inputs[-1] = np.concatenate([self.inputs[-1], flat_input])
                 self.targets[-1] = np.concatenate([self.targets[-1], flat_target])
+                self.timesteps[-1] = np.concatenate([self.timesteps[-1], flat_t_t])
                 if img is not None:
                     self.img_inputs[-1] = np.concatenate([self.img_inputs[-1], flat_img], axis=0)
 
@@ -344,15 +350,18 @@ class RewardModel:
                 if len(self.inputs) > self.max_size:
                     self.inputs = self.inputs[1:]
                     self.targets = self.targets[1:]
+                    self.timesteps = self.timesteps[1:]
                     if img is not None:
                         self.img_inputs = self.img_inputs[1:]
                 self.inputs.append([])
                 self.targets.append([])
+                self.timesteps.append([])
                 if img is not None:
                     self.img_inputs.append([])
             else: # clothfold env has is only a 1 step MDP
                 self.inputs.append([flat_input])
                 self.targets.append([flat_target])
+                self.timesteps.append([flat_t_t])
                 if img is not None:
                     self.img_inputs.append([flat_img])
 
@@ -360,17 +369,20 @@ class RewardModel:
                 if len(self.inputs) > self.max_size:
                     self.inputs = self.inputs[1:]
                     self.targets = self.targets[1:]
+                    self.timesteps = self.timesteps[1:]
                     if img is not None:
                         self.img_inputs = self.img_inputs[1:]
         else:
             if len(self.inputs[-1]) == 0:
                 self.inputs[-1] = flat_input
                 self.targets[-1] = flat_target
+                self.timesteps[-1] = flat_t_t
                 if img is not None:
                     self.img_inputs[-1] = flat_img
             else:
                 self.inputs[-1] = np.concatenate([self.inputs[-1], flat_input])
                 self.targets[-1] = np.concatenate([self.targets[-1], flat_target])
+                self.timesteps[-1] = np.concatenate([self.timesteps[-1], flat_t_t])
                 if img is not None:
                     self.img_inputs[-1] = np.concatenate([self.img_inputs[-1], flat_img], axis=0)
                 
@@ -511,6 +523,7 @@ class RewardModel:
 
         batch_index_2 = np.random.choice(max_len, size=mb_size, replace=True)
         sa_t_2 = train_inputs[batch_index_2] # Batch x T x dim of s&a
+        # breakpoint()
         t_t_2 = train_tsteps[batch_index_2]
         r_t_2 = train_targets[batch_index_2] # Batch x T x 1
         if self.vlm_label or self.image_reward:
@@ -1038,6 +1051,7 @@ class RewardModel:
                     # labels.ravel()[indices_to_flip] = ~labels.ravel()[indices_to_flip]
                     labels.ravel()[indices_to_flip] = 1 - labels.ravel()[indices_to_flip]
             
+        breakpoint()
         if len(labels) > 0:
             if not self.image_reward:
                 self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
@@ -1160,6 +1174,9 @@ class RewardModel:
                 _, predicted = torch.max(r_hat.data, 1)
                 correct = (predicted == labels).sum().item()
                 ensemble_acc[member] += correct
+
+                if self.wandb is not None:
+                    self.wandb.log({f"{member}_loss" : curr_loss.item(), f"{member}_acc" : correct})
                 
             loss.backward()
             self.opt.step()
