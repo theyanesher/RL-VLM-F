@@ -198,8 +198,8 @@ class RewardModel:
             self.resize_factor = resize_factor
 
         self.buffer_label = np.empty((self.capacity, 1), dtype=np.float32)
-        self.buffer_tstep1 = torch.empty((self.capacity, self.size_segment, 1), dtype=torch.float32, device=device)
-        self.buffer_tstep2 = torch.empty((self.capacity, self.size_segment, 1), dtype=torch.float32, device=device) 
+        self.buffer_tstep1 = np.empty((self.capacity, self.size_segment, 1), dtype=np.float32)
+        self.buffer_tstep2 = np.empty((self.capacity, self.size_segment, 1), dtype=np.float32)
         self.buffer_index = 0
         self.buffer_full = False
                 
@@ -252,6 +252,7 @@ class RewardModel:
         self.flip_label = flip_label
         self.prox_flip = prox_flip
         self.flip_percent = flip_percent
+        self.train_reward_loss = 0.0
         
         
         self.cached_label_path = cached_label_path
@@ -277,8 +278,10 @@ class RewardModel:
         return  -(target * logprobs).sum() / input.shape[0]
     
     def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2): # modified loss function
-        alpha1 = t_t_1.float()
-        alpha2 = t_t_2.float()
+        alpha1 = torch.from_numpy(t_t_1).to(device)
+        alpha2 = torch.from_numpy(t_t_2).to(device)
+        # r_hat_1 = torch.from_numpy(r_hat_1).float().to(device)
+        # r_hat_2 = torch.from_numpy(r_hat_2).float().to(device)
 
         logit1 = (torch.log(alpha1) + r_hat_1).sum(dim=1)
         logit2 = (torch.log(alpha2) + r_hat_2).sum(dim=1)
@@ -947,7 +950,7 @@ class RewardModel:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
                     mb_size=self.mb_size)
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels = self.get_label(
-                    sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2)
+                    sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2)
         else:
             if self.cached_label_path is None:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
@@ -1051,7 +1054,7 @@ class RewardModel:
                     # labels.ravel()[indices_to_flip] = ~labels.ravel()[indices_to_flip]
                     labels.ravel()[indices_to_flip] = 1 - labels.ravel()[indices_to_flip]
             
-        breakpoint()
+        # breakpoint()
         if len(labels) > 0:
             if not self.image_reward:
                 self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
@@ -1177,7 +1180,7 @@ class RewardModel:
 
                 if self.wandb is not None:
                     self.wandb.log({f"{member}_loss" : curr_loss.item(), f"{member}_acc" : correct})
-                
+            self.train_reward_loss = loss.item()
             loss.backward()
             self.opt.step()
         
