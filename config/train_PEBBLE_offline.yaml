@@ -5,13 +5,13 @@ defaults:
 experiment: PEBBLE
 
 # reward learning
-segment: 50
+segment: 1
 activation: tanh
 num_seed_steps: 1000
 num_unsup_steps: 5000
 num_interact: 5000
 reward_lr: 0.0003
-reward_batch: 128
+reward_batch: 20
 # reward_update: 200
 reward_update: 5 # for soccer
 feed_type: 0
@@ -61,7 +61,7 @@ sum_segment_score: false
 collect_data_interval: 0
 max_image_difference: 0
 use_first_and_last: 0
-image_reward: 0
+image_reward: 1
 resnet: 0 # default
 conv_kernel_sizes: [5, 3, 3, 3] # default
 conv_n_channels: [16, 32, 64, 128] # default
@@ -85,6 +85,8 @@ reward_model_score_load_dir: "None"
 agent_model_load_dir: "None"
 mode: train
 save_images: false
+
+dataset_path: '/home/theya/RL-VLM-F/test_dummy/drawer-open/expert/data_0.pkl'
 
 # hydra configuration
 hydra:

@@ -38,8 +38,8 @@ class Offline_Workspace(object):
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
         self.log_success = False
-        # with open(cfg.dataset_path, 'rb') as f:
-        #         self.dataset = pkl.load(f)
+        with open(cfg.dataset_path, 'rb') as f:
+                self.dataset = pkl.load(f)
         
         current_file_path = os.path.dirname(os.path.realpath(__file__))
         os.system("cp {}/prompt.py {}/".format(current_file_path, self.logger._log_dir))
@@ -81,13 +81,13 @@ class Offline_Workspace(object):
         self.image_height = image_height
         self.image_width = image_width
 
-        # self.replay_buffer = ReplayBuffer(
-        #     self.env.observation_space.shape,
-        #     self.env.action_space.shape,
-        #     int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 200000, # we cannot afford to store too many images in the replay buffer.
-        #     self.device,
-        #     store_image=self.cfg.image_reward,
-        #     image_size=image_height)
+        self.replay_buffer = ReplayBuffer(
+            self.env.observation_space.shape,
+            self.env.action_space.shape,
+            int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 2000, # we cannot afford to store too many images in the replay buffer.
+            self.device,
+            store_image=self.cfg.image_reward,
+            image_size=image_height)
         
         # for logging
         self.total_feedback = 0
@@ -151,7 +151,7 @@ class Offline_Workspace(object):
         #     print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
         #     self.agent.load(self.cfg.agent_model_load_dir, 1000000) 
         
-        # self.load_dataset_to_buffer()
+        self.load_dataset_to_buffer()
         
     def evaluate(self, save_additional=False):
         average_episode_reward = 0
@@ -319,7 +319,7 @@ class Offline_Workspace(object):
         reward_learning_acc = 0
         vlm_acc = 0
         eval_cnt = 0
-        for self.step in tqdm(range(self.cfg.num_train_steps)):
+        for self.step in tqdm(range(int(self.cfg.num_train_steps))):
             
             # update reward function
             if self.total_feedback < self.cfg.max_feedback and (
@@ -392,10 +392,13 @@ class Offline_Workspace(object):
             else:
                 reward_hat = reward
             if self.cfg.image_reward and self.reward not in ["gt_task_reward", "sparse_task_reward"]:
+                # print('here')
                 rgb_image = self.dataset["images"][i]
-                self.replay_buffer.add(obs, action, reward_hat, 
-                    next_obs, done, done, image=rgb_image[::self.resize_factor, ::self.resize_factor, :])
+                self.reward_model.add_data(obs, action, reward_hat, 
+                    done, img=rgb_image[::self.resize_factor, ::self.resize_factor, :])
             else:
+                print('i am in wrong place')
+                print(self.reward)
                 self.replay_buffer.add(obs, action, reward_hat, 
                     next_obs, done, done)
                 

@@ -127,7 +127,7 @@ def compute_smallest_dist(obs, full_obs):
 class RewardModel:
     def __init__(self, ds, da, 
                  ensemble_size=3, lr=3e-4, mb_size = 128, size_segment=1, 
-                 max_size=100, activation='tanh', capacity=5e5,  
+                 max_size=30, activation='tanh', capacity=5e5,  
                  large_batch=1, label_margin=0.0, 
                  teacher_beta=-1, teacher_gamma=1, 
                  teacher_eps_mistake=0, 
@@ -250,6 +250,7 @@ class RewardModel:
         
         
         self.cached_label_path = cached_label_path
+        # breakpoint()
         if self.cached_label_path is not None:
             # file_path = os.path.abspath(__file__)
             # dir_path = os.path.dirname(file_path)
