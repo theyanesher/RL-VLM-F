@@ -4,8 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 import time
-
-
 import asyncio
 from PIL import Image
 import datetime
@@ -278,19 +276,25 @@ class RewardModel:
         return  -(target * logprobs).sum() / input.shape[0]
     
     def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2): # modified loss function
-        alpha1 = torch.from_numpy(t_t_1).to(device)
-        alpha2 = torch.from_numpy(t_t_2).to(device)
-        # r_hat_1 = torch.from_numpy(r_hat_1).float().to(device)
-        # r_hat_2 = torch.from_numpy(r_hat_2).float().to(device)
+        alpha1 = torch.from_numpy(t_t_1+1).to(device).squeeze(1)
+        alpha2 = torch.from_numpy(t_t_2+1).to(device).squeeze(1)
 
-        logit1 = (torch.log(alpha1) + r_hat_1).sum(dim=1)
-        logit2 = (torch.log(alpha2) + r_hat_2).sum(dim=1)
+        exp1 = torch.exp(r_hat_1)
+        exp2 = torch.exp(r_hat_2)
 
-        logit = logit1 - logit2   # relative preference logit
-        p = torch.sigmoid(logit)
+        # breakpoint()
+        # per-timestep probability
+        p_t = (alpha1 * exp1) / (alpha1 * exp1 + alpha2 * exp2)
 
-        labels = labels.float().view(-1, 1)
-        loss = F.binary_cross_entropy(p, labels)
+        # mean across whole segment
+        p_t = p_t.mean(dim=1)  # (batch × 1)
+
+        # label: 0 → seg1 preferred, 1 → seg2 preferred
+        labels = labels.float()
+
+        # breakpoint()
+        # BCE loss
+        loss = F.binary_cross_entropy(p_t, labels)
         return loss
     
     def change_batch(self, new_frac):
