@@ -174,6 +174,7 @@ class RewardModel:
         self.activation = activation
         self.size_segment = size_segment
         self.wandb=wandb
+        self.ensemble_acc = 0
         
         self.capacity = int(capacity)
         self.reward_model_layers = reward_model_layers
@@ -207,6 +208,7 @@ class RewardModel:
         self.timesteps = []
         self.raw_actions = []
         self.img_inputs = []
+        self.traj_lens = []
         self.mb_size = mb_size
         self.origin_mb_size = mb_size
         if not image_reward:
@@ -275,9 +277,9 @@ class RewardModel:
         logprobs = torch.nn.functional.log_softmax (input, dim = 1)
         return  -(target * logprobs).sum() / input.shape[0]
     
-    def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2): # modified loss function
-        alpha1 = torch.from_numpy(t_t_1+1).to(device).squeeze(1)
-        alpha2 = torch.from_numpy(t_t_2+1).to(device).squeeze(1)
+    def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2, tl_t_1, tl_t_2): # modified loss function
+        alpha1 = torch.from_numpy(t_t_1/tl_t_1).to(device).squeeze(1)
+        alpha2 = torch.from_numpy(t_t_2/tl_t_2).to(device).squeeze(1)
 
         exp1 = torch.exp(r_hat_1)
         exp2 = torch.exp(r_hat_2)
@@ -399,6 +401,15 @@ class RewardModel:
             self.inputs.append(obses[index])
             self.targets.append(rewards[index])
             self.timesteps.append(timesteps[index])
+
+    def add_dataloader_data(self, dataloader):
+        self.inputs, self.targets, self.img_inputs, self.timesteps, self.traj_lens = dataloader
+        self.inputs = self.inputs.float().transpose(0,1)
+        self.targets = self.targets.float().transpose(0,1)
+        self.timesteps = self.timesteps.float().transpose(0,1)
+        self.traj_lens = self.traj_lens.float().transpose(0,1)
+        if self.image_reward:
+            self.img_inputs = self.img_inputs.float().transpose(0,1)
         
     def get_rank_probability(self, x_1, x_2):
         # get probability x_1 > x_2
@@ -444,7 +455,7 @@ class RewardModel:
 
     def r_hat_member(self, x, member=-1):
         # the network parameterizes r hat in eqn 1 from the paper
-        return self.ensemble[member](torch.from_numpy(x).float().to(device))
+        return self.ensemble[member](x.float().to(device))
 
     def r_hat(self, x):
         # they say they average the rewards from each member of the ensemble, but I think this only makes sense if the rewards are already normalized
@@ -513,7 +524,28 @@ class RewardModel:
         ensemble_acc = ensemble_acc / total
         return np.mean(ensemble_acc)
     
-    def get_queries(self, mb_size=20):
+    def get_queries(self):
+
+        batch_index_1 = np.random.choice(len(self.inputs), size=len(self.inputs)//2, replace=True)
+        batch_index_2 = np.random.choice(len(self.inputs), size=len(self.inputs)//2, replace=True)
+        sa_t_1 = self.inputs[batch_index_1]
+        sa_t_2 = self.inputs[batch_index_2]
+        t_t_1 = self.timesteps[batch_index_1]
+        t_t_2 = self.timesteps[batch_index_2]
+        r_t_1 = self.targets[batch_index_1]
+        r_t_2 = self.targets[batch_index_2]
+        tl_t_1 = self.traj_lens[batch_index_1]
+        tl_t_2 = self.traj_lens[batch_index_2]
+        if self.vlm_label or self.image_reward:
+            # breakpoint()
+            img_t_1 = self.img_inputs[batch_index_1]
+            img_t_2 = self.img_inputs[batch_index_2]
+        print("Querying segments: ", sa_t_1.shape, img_t_1.shape)
+        # breakpoint()
+        return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1 if (self.vlm_label or self.image_reward) else None, img_t_2 if (self.vlm_label or self.image_reward) else None
+        
+    
+    def get_queries_1(self, mb_size=20):
         len_traj, max_len = len(self.inputs[0]), len(self.inputs)
         
         if len(self.inputs[-1]) < len_traj:
@@ -633,45 +665,61 @@ class RewardModel:
             np.copyto(self.buffer_tstep2[self.buffer_index:next_index], t_t_2)
             np.copyto(self.buffer_label[self.buffer_index:next_index], labels)
             self.buffer_index = next_index
-            
-    def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1=None, img_t_2=None):
-        sum_r_t_1 = np.sum(r_t_1, axis=1)
-        sum_r_t_2 = np.sum(r_t_2, axis=1)
+    
+    def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1=None, img_t_2=None):
+        # breakpoint()
+        sum_r_t_1 = torch.sum(r_t_1, axis=1) # we're processing multiple trajectory pairs in a batch.
+        sum_r_t_2 = torch.sum(r_t_2, axis=1)
         
         # skip the query
         if self.teacher_thres_skip > 0: 
-            max_r_t = np.maximum(sum_r_t_1, sum_r_t_2)
-            max_index = (max_r_t > self.teacher_thres_skip).reshape(-1)
+            max_r_t = torch.maximum(sum_r_t_1, sum_r_t_2) # returns a max_r_t of same shape as sum_r_t_1, taking element-wise maximum from sum_r_t_1 and sum_r_t_2
+            max_index = (max_r_t > self.teacher_thres_skip).reshape(-1) # max_index is a boolean mask -> identifies which trajectory pairs are worth labeling
             if sum(max_index) == 0:
                 return None, None, None, None, []
 
+            # apply mask, drop those entries which have very low reward
             sa_t_1 = sa_t_1[max_index]
             sa_t_2 = sa_t_2[max_index]
             r_t_1 = r_t_1[max_index]
             r_t_2 = r_t_2[max_index]
-            sum_r_t_1 = np.sum(r_t_1, axis=1)
-            sum_r_t_2 = np.sum(r_t_2, axis=1)
+            t_t_1 = t_t_1[max_index]
+            t_t_2 = t_t_2[max_index]
+            sum_r_t_1 = torch.sum(r_t_1, axis=1) # updated reward
+            sum_r_t_2 = torch.sum(r_t_2, axis=1) 
         
         # equally preferable
-        margin_index = (np.abs(sum_r_t_1 - sum_r_t_2) < self.teacher_thres_equal).reshape(-1)
+        margin_index = (torch.abs(sum_r_t_1 - sum_r_t_2) < self.teacher_thres_equal).reshape(-1)
         
-        # perfectly rational
+        # perfectly rational, means not making any mistakes or adding any noise
         seg_size = r_t_1.shape[1]
-        temp_r_t_1 = r_t_1.copy()
-        temp_r_t_2 = r_t_2.copy()
+        temp_r_t_1 = r_t_1
+        temp_r_t_2 = r_t_2
         for index in range(seg_size-1):
-            temp_r_t_1[:,:index+1] *= self.teacher_gamma
+            temp_r_t_1[:,:index+1] *= self.teacher_gamma # currently gamma is set to 1 in config file, so teacher does not contribute 
             temp_r_t_2[:,:index+1] *= self.teacher_gamma
-        sum_r_t_1 = np.sum(temp_r_t_1, axis=1)
-        sum_r_t_2 = np.sum(temp_r_t_2, axis=1)
+        sum_r_t_1 = torch.sum(temp_r_t_1, axis=1) # discounted reward sum
+        sum_r_t_2 = torch.sum(temp_r_t_2, axis=1)
+
+        avg_t_1 = torch.mean(t_t_1, axis=1) # calculate average timestep for segments 
+        avg_t_2 = torch.mean(t_t_2, axis=1)
+
+        traj_len = 201 # CHANGE THIS, calculate from somewhere or do something else, needs to be changed
+        alpha1 = avg_t_1 / traj_len # how to find trajectory length?
+        alpha2 = avg_t_2 / traj_len
+
             
         rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
         if self.teacher_beta > 0: # Bradley-Terry rational model
-            r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
-                            torch.Tensor(sum_r_t_2)], axis=-1)
-            r_hat = r_hat*self.teacher_beta
-            ent = F.softmax(r_hat, dim=-1)[:, 1]
-            labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1)
+            # r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
+            #                 torch.Tensor(sum_r_t_2)], axis=-1)
+            # r_hat = r_hat*self.teacher_beta
+            # ent = F.softmax(r_hat, dim=-1)[:, 1]
+            logits1 = alpha1 * torch.exp(sum_r_t_1)
+            logits2 = alpha2 * torch.exp(sum_r_t_2)
+            prob_seg2 = logits2 / (logits1 + logits2)          # P(segment-2 preferred)
+            labels = torch.random.binomial(1, prob_seg2).reshape(-1, 1)
+            # labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
         else:
             labels = rational_labels
         
@@ -683,142 +731,11 @@ class RewardModel:
 
         # equally preferable
         labels[margin_index] = -1 
-        
-        # if self.vlm_label:
-        #     ts = time.time()
-        #     time_string = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
-
-        #     gpt_two_image_paths = []
-        #     combined_images_list = []
-        #     useful_indices = []
-            
-        #     file_path = os.path.abspath(__file__)
-        #     dir_path = os.path.dirname(file_path)
-        #     save_path = "{}/data/gpt_query_image/{}/{}".format(dir_path, self.env_name, time_string)
-        #     if not os.path.exists(save_path):
-        #         os.makedirs(save_path)
-                
-        #     for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-        #         combined_image = np.concatenate([img1, img2], axis=1)
-        #         combined_images_list.append(combined_image)
-        #         combined_image = Image.fromarray(combined_image)
-                
-        #         first_image_save_path = os.path.join(save_path, "first_{:06}.png".format(idx))
-        #         second_image_save_path = os.path.join(save_path, "second_{:06}.png".format(idx))
-        #         Image.fromarray(img1).save(first_image_save_path)
-        #         Image.fromarray(img2).save(second_image_save_path)
-        #         gpt_two_image_paths.append([first_image_save_path, second_image_save_path])
-                
-
-        #         diff = np.linalg.norm(img1 - img2)
-        #         if diff < 1e-3: # ignore the pair if the image is exactly the same
-        #             useful_indices.append(0)
-        #         else:
-        #             useful_indices.append(1)
-                        
-        #     if self.vlm == 'gpt4v_two_image': 
-        #         from vlms.gpt4_infer import gpt4v_infer_2
-        #         vlm_labels = []
-        #         for idx, (img_path_1, img_path_2) in enumerate(gpt_two_image_paths):
-        #             print("querying vlm {}/{}".format(idx, len(gpt_two_image_paths)))
-        #             query_prompt = gpt_free_query_env_prompts[self.env_name]
-        #             summary_prompt = gpt_summary_env_prompts[self.env_name]
-        #             res = gpt4v_infer_2(query_prompt, summary_prompt, img_path_1, img_path_2)
-        #             try:
-        #                 label_res = int(res)
-        #             except:
-        #                 label_res = -1
-
-        #             vlm_labels.append(label_res)
-        #             time.sleep(0.1)
-        #     elif self.vlm == 'gemini_single_prompt':
-        #         vlm_labels = []
-        #         for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-        #             res = gemini_query_1([
-        #                 gemini_free_query_prompt1,
-        #                 Image.fromarray(img1), 
-        #                 gemini_free_query_prompt2,
-        #                 Image.fromarray(img2), 
-        #                 gemini_single_query_env_prompts[self.env_name],
-        #             ])
-        #             try:
-        #                 if "-1" in res:
-        #                     res = -1
-        #                 elif "0" in res:
-        #                     res = 0
-        #                 elif "1" in res:
-        #                     res = 1
-        #                 else:
-        #                     res = -1
-        #             except:
-        #                 res = -1 
-        #             vlm_labels.append(res)
-        #     elif self.vlm == "gemini_free_form":
-        #         vlm_labels = []
-        #         for idx, (img1, img2) in enumerate(zip(img_t_1, img_t_2)):
-        #             res = gemini_query_2(
-        #                     [
-        #                         gemini_free_query_prompt1,
-        #                         Image.fromarray(img1), 
-        #                         gemini_free_query_prompt2,
-        #                         Image.fromarray(img2), 
-        #                         gemini_free_query_env_prompts[self.env_name]
-        #             ],
-        #                         gemini_summary_env_prompts[self.env_name]
-        #             )
-        #             try:
-        #                 res = int(res)
-        #                 if res not in [0, 1, -1]:
-        #                     res = -1
-        #             except:
-        #                 res = -1
-        #             vlm_labels.append(res)   
-
-        #     vlm_labels = np.array(vlm_labels).reshape(-1, 1)
-        #     good_idx = (vlm_labels != -1).flatten()
-        #     useful_indices = (np.array(useful_indices) == 1).flatten()
-        #     good_idx = np.logical_and(good_idx, useful_indices)
-            
-        #     sa_t_1 = sa_t_1[good_idx]
-        #     sa_t_2 = sa_t_2[good_idx]
-        #     r_t_1 = r_t_1[good_idx]
-        #     r_t_2 = r_t_2[good_idx]
-        #     rational_labels = rational_labels[good_idx]
-        #     vlm_labels = vlm_labels[good_idx]
-        #     combined_images_list = np.array(combined_images_list)[good_idx]
-        #     img_t_1 = img_t_1[good_idx]
-        #     img_t_2 = img_t_2[good_idx]
-        #     if self.flip_vlm_label:
-        #         vlm_labels = 1 - vlm_labels
-
-        #     if self.train_times % self.save_query_interval == 0 or 'gpt4v' in self.vlm:
-        #         save_path = os.path.join(self.log_dir, "vlm_label_set")
-        #         if not os.path.exists(save_path):
-        #             os.makedirs(save_path)
-        #         with open("{}/{}.pkl".format(save_path, time_string), "wb") as f:
-        #             pkl.dump([combined_images_list, rational_labels, vlm_labels, sa_t_1, sa_t_2, r_t_1, r_t_2], f, protocol=pkl.HIGHEST_PROTOCOL)
-
-        #     acc = 0
-        #     if len(vlm_labels) > 0:
-        #         acc = np.sum(vlm_labels == rational_labels) / len(vlm_labels)
-        #         print("vlm label acc: {}".format(acc))
-        #         print("vlm label acc: {}".format(acc))
-        #         print("vlm label acc: {}".format(acc))
-        #     else:
-        #         print("no vlm label")
-        #         print("no vlm label")
-        #         print("no vlm label")
-
-        #     self.vlm_label_acc = acc
-        #     if not self.image_reward:
-        #         return sa_t_1, sa_t_2, r_t_1, r_t_2, labels, vlm_labels
-        #     else:
-        #         return sa_t_1, sa_t_2, r_t_1, r_t_2, img_t_1, img_t_2, labels, vlm_labels
 
         if not self.image_reward:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels
         else:
-            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels
+            return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2, labels
     
     def kcenter_sampling(self):
         
@@ -942,6 +859,7 @@ class RewardModel:
         return len(labels)
     
     def uniform_sampling(self):
+        print('uniform sampling')
         if not self.vlm_label: 
             # get queries
             if not self.image_reward:
@@ -951,10 +869,10 @@ class RewardModel:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
                     sa_t_1, sa_t_2, r_t_1, r_t_2)
             else:
-                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
-                    mb_size=self.mb_size)
-                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2, labels = self.get_label(
-                    sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2)
+                # breakpoint()
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2 =  self.get_queries()
+                sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2, labels = self.get_label(
+                    sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2)
         else:
             if self.cached_label_path is None:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
@@ -1059,13 +977,16 @@ class RewardModel:
                     labels.ravel()[indices_to_flip] = 1 - labels.ravel()[indices_to_flip]
             
         # breakpoint()
-        if len(labels) > 0:
-            if not self.image_reward:
-                self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
-            else:
-                self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], t_t_1, t_t_2, labels)
+        # if len(labels) > 0:
+        #     if not self.image_reward:
+        #         self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
+        #     else:
+        #         self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], t_t_1, t_t_2, labels)
 
-        return len(labels)
+        if self.image_reward:
+            return img_t_1, img_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels
+        else:
+            return sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels
     
     def get_label_from_cached_states(self):
         if self.read_cache_idx >= len(self.all_cached_labels):
@@ -1119,6 +1040,7 @@ class RewardModel:
         return len(labels)
     
     def train_reward(self):
+        print('training reward model')
         self.train_times += 1
 
         ensemble_losses = [[] for _ in range(self.de)]
@@ -1129,38 +1051,42 @@ class RewardModel:
         for _ in range(self.de):
             total_batch_index.append(np.random.permutation(max_len))
         
-        num_epochs = int(np.ceil(max_len/self.train_batch_size))
+        # num_epochs = int(np.ceil(max_len/self.train_batch_size))
         total = 0
         
-        for epoch in range(num_epochs):
+        for epoch in range(1):
             self.opt.zero_grad()
             loss = 0.0
             
-            last_index = (epoch+1)*self.train_batch_size
-            if last_index > max_len:
-                last_index = max_len
+            # last_index = (epoch+1)*self.train_batch_size
+            # if last_index > max_len:
+            #     last_index = max_len
                 
             for member in range(self.de):
                 
-                # get random batch
-                idxs = total_batch_index[member][epoch*self.train_batch_size:last_index]
-                sa_t_1 = self.buffer_seg1[idxs]
-                sa_t_2 = self.buffer_seg2[idxs]
-                t_t_1 = self.buffer_tstep1[idxs]
-                t_t_2 = self.buffer_tstep2[idxs]
-                labels = self.buffer_label[idxs]
-                labels = torch.from_numpy(labels.flatten()).long().to(device)
-                
+                # # get random batch
+                # idxs = total_batch_index[member][epoch*self.train_batch_size:last_index]
+                # sa_t_1 = self.buffer_seg1[idxs]
+                # sa_t_2 = self.buffer_seg2[idxs]
+                # t_t_1 = self.buffer_tstep1[idxs]
+                # t_t_2 = self.buffer_tstep2[idxs]
+                # labels = self.buffer_label[idxs]
+                # labels = torch.from_numpy(labels.flatten()).long().to(device)
+                print(f"Member {member} sampling")
+
+                sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels = self.uniform_sampling()
+                # breakpoint()
                 if member == 0:
-                    total += labels.size(0)
+                    total += len(labels)
                 
                 if self.image_reward:
+                    breakpoint()
                     # sa_t_1 is batch_size x segment x image_height x image_width x 3
-                    sa_t_1 = np.transpose(sa_t_1, (0, 1, 4, 2, 3)) # for torch we need to transpose channel first
-                    sa_t_2 = np.transpose(sa_t_2, (0, 1, 4, 2, 3)) 
+                    sa_t_1 = sa_t_1.permute(0, 1, 4, 2, 3) # for torch we need to transpose channel first
+                    sa_t_2 = sa_t_1.permute(0, 1, 4, 2, 3)
                     # also we stored uint8 images, we need to convert them to float32
-                    sa_t_1 = sa_t_1.astype(np.float32) / 255.0
-                    sa_t_2 = sa_t_2.astype(np.float32) / 255.0
+                    sa_t_1 = sa_t_1.to(torch.float32) / 255.0
+                    sa_t_2 = sa_t_2.to(torch.float32) / 255.0
                     sa_t_1 = sa_t_1.squeeze(1)
                     sa_t_2 = sa_t_2.squeeze(1)
 
@@ -1173,7 +1099,7 @@ class RewardModel:
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
-                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2)
+                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
                 
@@ -1189,6 +1115,7 @@ class RewardModel:
             self.opt.step()
         
         ensemble_acc = ensemble_acc / total
+        self.ensemble_acc = ensemble_acc
         
         torch.cuda.empty_cache()
         
