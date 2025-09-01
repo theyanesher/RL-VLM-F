@@ -115,9 +115,10 @@ class Offline_Workspace(object):
 
         self.dataset_loader = DataLoader(
             OfflineDataset(self.data_path),
-            batch_size= 1, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
+            batch_size= 2, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
             shuffle=True,
-            num_workers=4
+            num_workers=4,
+            drop_last=True
         )
 
         
@@ -290,6 +291,12 @@ class Offline_Workspace(object):
 
         train_acc = 0
         total_acc = 0
+        # self.dataset_loader = DataLoader(
+        #     OfflineDataset(self.data_path),
+        #     batch_size=2,
+        #     shuffle=True,
+        #     num_workers=4
+        # )
 
         # local tqdm for dataset loader
         for data in tqdm(self.dataset_loader, desc="Updating reward model", leave=False):
@@ -299,7 +306,7 @@ class Offline_Workspace(object):
                 self.reward_model.train()
                 train_acc = self.reward_model.train_soft_reward()
             else:
-                print('here')
+                # print('here')
                 self.reward_model.train()
                 train_acc = self.reward_model.train_reward()
 
@@ -308,16 +315,17 @@ class Offline_Workspace(object):
             if total_acc > 0.97:
                 break
 
-            if self.reward == 'learn_from_preference':
-                print(f"Reward function is updated!! ACC: {total_acc:.4f}")
-            elif self.reward == 'learn_from_score':
-                print(f"Reward function is updated!! MSE: {total_acc:.4f}")
+            # if self.reward == 'learn_from_preference':
+            #     print(f"Reward function is updated!! ACC: {total_acc:.4f}")
+            # elif self.reward == 'learn_from_score':
+            #     print(f"Reward function is updated!! MSE: {total_acc:.4f}")
 
             self.wandb.log({
-                "accuracy": self.reward_model.ensemble_acc,
+                "accuracy": total_acc,
                 "loss": self.reward_model.train_reward_loss
             })
             self.reward_learning_acc = total_acc
+            tqdm.write(f"Acc: {total_acc:.4f}, loss: {self.reward_model.train_reward_loss:.4f}")
 
         return total_acc, self.reward_model.vlm_label_acc
 

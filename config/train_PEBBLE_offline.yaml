@@ -11,7 +11,7 @@ num_seed_steps: 1000
 num_unsup_steps: 5000
 num_interact: 5000
 reward_lr: 0.0003
-reward_batch: 20
+reward_batch: 150
 # reward_update: 200
 reward_update: 5 # for soccer
 feed_type: 0
