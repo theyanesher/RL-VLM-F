@@ -278,8 +278,9 @@ class RewardModel:
         return  -(target * logprobs).sum() / input.shape[0]
     
     def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2, tl_t_1, tl_t_2): # modified loss function
-        alpha1 = torch.from_numpy(t_t_1/tl_t_1).to(device).squeeze(1)
-        alpha2 = torch.from_numpy(t_t_2/tl_t_2).to(device).squeeze(1)
+        # breakpoint()
+        alpha1 = (t_t_1/tl_t_1).to(device)
+        alpha2 = (t_t_2/tl_t_2).to(device)
 
         exp1 = torch.exp(r_hat_1)
         exp2 = torch.exp(r_hat_2)
@@ -292,7 +293,7 @@ class RewardModel:
         p_t = p_t.mean(dim=1)  # (batch × 1)
 
         # label: 0 → seg1 preferred, 1 → seg2 preferred
-        labels = labels.float()
+        labels = labels.float().to(device)
 
         # breakpoint()
         # BCE loss
@@ -455,7 +456,7 @@ class RewardModel:
 
     def r_hat_member(self, x, member=-1):
         # the network parameterizes r hat in eqn 1 from the paper
-        return self.ensemble[member](x.float().to(device))
+        return self.ensemble[member](x.to(device))
 
     def r_hat(self, x):
         # they say they average the rewards from each member of the ensemble, but I think this only makes sense if the rewards are already normalized
@@ -526,8 +527,8 @@ class RewardModel:
     
     def get_queries(self):
 
-        batch_index_1 = np.random.choice(len(self.inputs), size=len(self.inputs)//2, replace=True)
-        batch_index_2 = np.random.choice(len(self.inputs), size=len(self.inputs)//2, replace=True)
+        batch_index_1 = np.random.choice(len(self.inputs), size=len(self.inputs-1)//2, replace=True)
+        batch_index_2 = np.random.choice(len(self.inputs), size=len(self.inputs-1)//2, replace=True)
         sa_t_1 = self.inputs[batch_index_1]
         sa_t_2 = self.inputs[batch_index_2]
         t_t_1 = self.timesteps[batch_index_1]
@@ -540,7 +541,7 @@ class RewardModel:
             # breakpoint()
             img_t_1 = self.img_inputs[batch_index_1]
             img_t_2 = self.img_inputs[batch_index_2]
-        print("Querying segments: ", sa_t_1.shape, img_t_1.shape)
+        # print("Querying segments: ", sa_t_1.shape, img_t_1.shape)
         # breakpoint()
         return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1 if (self.vlm_label or self.image_reward) else None, img_t_2 if (self.vlm_label or self.image_reward) else None
         
@@ -859,7 +860,7 @@ class RewardModel:
         return len(labels)
     
     def uniform_sampling(self):
-        print('uniform sampling')
+        # print('uniform sampling')
         if not self.vlm_label: 
             # get queries
             if not self.image_reward:
@@ -1040,7 +1041,7 @@ class RewardModel:
         return len(labels)
     
     def train_reward(self):
-        print('training reward model')
+        # print('training reward model')
         self.train_times += 1
 
         ensemble_losses = [[] for _ in range(self.de)]
@@ -1072,7 +1073,7 @@ class RewardModel:
                 # t_t_2 = self.buffer_tstep2[idxs]
                 # labels = self.buffer_label[idxs]
                 # labels = torch.from_numpy(labels.flatten()).long().to(device)
-                print(f"Member {member} sampling")
+                # print(f"Member {member} sampling")
 
                 sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels = self.uniform_sampling()
                 # breakpoint()
@@ -1080,31 +1081,36 @@ class RewardModel:
                     total += len(labels)
                 
                 if self.image_reward:
-                    breakpoint()
                     # sa_t_1 is batch_size x segment x image_height x image_width x 3
                     sa_t_1 = sa_t_1.permute(0, 1, 4, 2, 3) # for torch we need to transpose channel first
-                    sa_t_2 = sa_t_1.permute(0, 1, 4, 2, 3)
+                    sa_t_2 = sa_t_2.permute(0, 1, 4, 2, 3)
                     # also we stored uint8 images, we need to convert them to float32
                     sa_t_1 = sa_t_1.to(torch.float32) / 255.0
                     sa_t_2 = sa_t_2.to(torch.float32) / 255.0
-                    sa_t_1 = sa_t_1.squeeze(1)
-                    sa_t_2 = sa_t_2.squeeze(1)
+                    sa_t_11 = sa_t_1.squeeze(1)
+                    sa_t_22 = sa_t_2.squeeze(1)
+                    # breakpoint()
 
                 # get logits
-                r_hat1 = self.r_hat_member(sa_t_1, member=member)
-                r_hat2 = self.r_hat_member(sa_t_2, member=member)
+                r_hat1 = self.r_hat_member(sa_t_11, member=member)
+                r_hat2 = self.r_hat_member(sa_t_22, member=member)
                 if not self.image_reward:
                     r_hat1 = r_hat1.sum(axis=1)
                     r_hat2 = r_hat2.sum(axis=1)
+                # breakpoint()
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
                 curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
+                # breakpoint()
                 
                 # compute acc
+                # breakpoint()
                 _, predicted = torch.max(r_hat.data, 1)
+                # predicted = predicted.to(device)
+                labels = labels.to(device)
                 correct = (predicted == labels).sum().item()
                 ensemble_acc[member] += correct
 
