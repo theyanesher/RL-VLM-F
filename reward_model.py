@@ -10,6 +10,7 @@ import datetime
 import pickle as pkl
 import random
 import cv2
+import matplotlib.pyplot as plt
 
 # from prompt import (
 #     gemini_free_query_env_prompts, gemini_summary_env_prompts,
@@ -211,6 +212,7 @@ class RewardModel:
         self.traj_lens = []
         self.mb_size = mb_size
         self.origin_mb_size = mb_size
+        self.eval_steps = 0
         if not image_reward:
             self.train_batch_size = 128
         else:
@@ -233,7 +235,7 @@ class RewardModel:
         self.teacher_eps_equal = teacher_eps_equal
         self.teacher_eps_skip = teacher_eps_skip
         self.teacher_thres_skip = 0
-        self.teacher_thres_equal = 0
+        self.teacher_thres_equal = 0.01
         
         self.label_margin = label_margin
         self.label_target = 1 - 2*self.label_margin
@@ -403,10 +405,45 @@ class RewardModel:
     #         self.targets.append(rewards[index])
     #         self.timesteps.append(timesteps[index])
 
+    def eval_and_plot(self, sa_t, r_gt, title='Reward Model Evaluation'):
+        """
+        eval_inputs: tensor of states/obs to evaluate on (N, d)
+        eval_targets: tensor or array of ground truth rewards (N, 1) or (N,)
+        wandb_run: wandb run object (self.wandb or externally provided)
+        """
+        self.eval()  # sets model to eval mode
+        
+        with torch.no_grad():
+            # Predict rewards (assume ensemble, get mean; adapt as needed!)
+            preds = []
+            for member in range(self.de):
+                r_hat1 = self.r_hat_member(sa_t, member=member)
+                preds.append(r_hat1.cpu().numpy().squeeze())
+            pred_rewards = np.mean(np.stack(preds, axis=0), axis=0)
+        
+        gt = r_gt.cpu().numpy().squeeze()
+        x_axis = np.arange(len(gt))
+        
+        # Plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(x_axis, gt, label='Ground Truth Reward', color='black')
+        plt.plot(x_axis, pred_rewards, label='Predicted Reward', color='red')
+        plt.xlabel('Sample Index')
+        plt.ylabel('Reward')
+        plt.title(title)
+        plt.legend()
+        plt.tight_layout()
+        
+        # Save or log to wandb
+        if self.wandb is not None:
+            self.wandb.log({"reward_vs_gt": plt})
+        plt.close()  # Avoid plt.show() in non-interactive envs
+        self.train()  # revert to train mode
+
     def add_dataloader_data(self, dataloader):
         # breakpoint()
         self.inputs, self.targets, self.img_inputs, self.timesteps, self.traj_lens = dataloader
-        print('Loaded data from dataloader', self.inputs.shape, self.targets.shape, self.timesteps.shape, self.traj_lens.shape, self.img_inputs.shape)
+        # print('Loaded data from dataloader', self.inputs.shape, self.targets.shape, self.timesteps.shape, self.traj_lens.shape, self.img_inputs.shape)
         self.inputs = self.inputs.float().transpose(0,1).to(device)
         self.targets = self.targets.float().transpose(0,1).to(device)
         self.timesteps = self.timesteps.float().transpose(0,1).to(device)
@@ -528,7 +565,13 @@ class RewardModel:
     #     return np.mean(ensemble_acc)
     
     def get_queries(self):
-        print('len of data: ', len(self.inputs), self.inputs.shape)
+        # print('len of data: ', len(self.inputs), self.inputs.shape)
+        # print("Sampling batch of size: ", self.mb_size)
+        # print('Sampling batch of size: ', self.mb_size)
+        # breakpoint()
+        # if self.mb_size < 150:
+        #     print('mb error')
+            # breakpoint()
         batch_index_1 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
         batch_index_2 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
 
@@ -545,7 +588,10 @@ class RewardModel:
             img_t_1 = self.img_inputs[:,:1][batch_index_1]
             img_t_2 = self.img_inputs[:,1:][batch_index_2]
             # print(img_t_1.shape, self.img_inputs.shape)
-        print("Querying segments: ", sa_t_1.shape, img_t_1.shape)
+        # print("Querying segments: ", sa_t_1.shape, img_t_1.shape)
+        if sa_t_1.size(0) == 0 or sa_t_2.size(0) == 0:
+            print("-----------------------------Warning: No samples in batch, skipping training step -----------------------------------------------------------------")
+            # breakpoint()
         return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1 if (self.vlm_label or self.image_reward) else None, img_t_2 if (self.vlm_label or self.image_reward) else None
         
     
@@ -988,9 +1034,9 @@ class RewardModel:
         #         self.put_queries(img_t_1[:, ::self.resize_factor, ::self.resize_factor, :], img_t_2[:, ::self.resize_factor, ::self.resize_factor, :], t_t_1, t_t_2, labels)
 
         if self.image_reward:
-            return img_t_1, img_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels
+            return img_t_1, img_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, r_t_1, r_t_2, labels
         else:
-            return sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels
+            return sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, r_t_1, r_t_2, labels
     
     # def get_label_from_cached_states(self):
     #     if self.read_cache_idx >= len(self.all_cached_labels):
@@ -1077,12 +1123,12 @@ class RewardModel:
                 # labels = self.buffer_label[idxs]
                 # labels = torch.from_numpy(labels.flatten()).long().to(device)
                 # print(f"Member {member} sampling")
-                sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, labels = self.uniform_sampling()
+                sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, r_t_1, r_t_2, labels = self.uniform_sampling()
                     
                 if member == 0:
                     total += len(labels)
-                # if sa_t_1.size(0) == 0 or sa_t_2.size(0) == 0 or len(labels) == 0:
-                #     print("-----------------------------Warning: No samples in batch, skipping training step -----------------------------------------------------------------")
+                if sa_t_1.size(0) == 0 or sa_t_2.size(0) == 0 or len(labels) == 0:
+                    print("-----------------------------Warning: No samples in batch, skipping training step -----------------------------------------------------------------")
                 #     return self.ensemble_acc  # or some default value, or continue to next step
                 
                 if self.image_reward:
@@ -1097,6 +1143,10 @@ class RewardModel:
                     # print(sa_t_11.shape, sa_t_22.shape)
                     # breakpoint()
 
+                if self.eval_steps+1 % 50 == 0:
+                    self.eval_and_plot(sa_t_11, r_t_1)
+                    print("Eval and plot done")
+                    return self.ensemble_acc
 
                 # get logits
                 r_hat1 = self.r_hat_member(sa_t_11, member=member)
@@ -1108,7 +1158,8 @@ class RewardModel:
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
-                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                # curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                curr_loss = self.CEloss(r_hat, labels)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
                 # breakpoint()
@@ -1117,12 +1168,13 @@ class RewardModel:
                 # breakpoint()
                 _, predicted = torch.max(r_hat.data, 1)
                 # predicted = predicted.to(device)
-                labels = labels.to(device)
+                # labels = labels.to(device)
                 correct = (predicted == labels).sum().item()
                 ensemble_acc[member] += correct
 
                 if self.wandb is not None:
-                    self.wandb.log({f"{member}_loss" : curr_loss.item(), f"{member}_acc" : correct})
+                    self.wandb.log({f"{member}_loss" : curr_loss.item(), f"{member}_acc" : correct/len(labels)})
+                # breakpoint()
             self.train_reward_loss = loss.item()
             loss.backward()
             self.opt.step()

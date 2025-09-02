@@ -283,6 +283,9 @@ class Offline_Workspace(object):
                         self.step)
             
         self.logger.dump(self.step)
+
+    def eval_reward_model(self):
+        pass
     
     def learn_reward(self, first_flag=0):
         labeled_queries = 1
@@ -312,8 +315,8 @@ class Offline_Workspace(object):
 
             total_acc = np.mean(train_acc)
 
-            if total_acc > 0.97:
-                break
+            # if total_acc > 0.97:
+            #     break
 
             # if self.reward == 'learn_from_preference':
             #     print(f"Reward function is updated!! ACC: {total_acc:.4f}")
@@ -352,8 +355,8 @@ class Offline_Workspace(object):
                 frac = 1
             self.reward_model.change_batch(frac)
 
-            if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
-                self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
+            # if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
+            #     self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
 
             reward_learning_acc, vlm_acc = self.learn_reward()
             print("reward learn", self.reward_learning_acc)
@@ -367,6 +370,7 @@ class Offline_Workspace(object):
             self.logger.log('train/reward_learning_acc', self.reward_learning_acc, self.step)
             self.logger.log('train/vlm_acc', vlm_acc, self.step)
             interact_count += 1
+            self.reward_model.eval_steps = self.step
 
             if self.step % self.cfg.save_interval == 0 and self.step > 0:
                 self.reward_model.save(model_save_dir, self.step)
