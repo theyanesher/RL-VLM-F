@@ -282,12 +282,12 @@ class RewardModel:
         alpha1 = (t_t_1/tl_t_1).to(device)
         alpha2 = (t_t_2/tl_t_2).to(device)
 
-        exp1 = torch.exp(r_hat_1)
-        exp2 = torch.exp(r_hat_2)
+        exp1 = torch.exp(alpha1 * r_hat_1)
+        exp2 = torch.exp(alpha2 * r_hat_2)
 
         # breakpoint()
         # per-timestep probability
-        p_t = (alpha1 * exp1) / (alpha1 * exp1 + alpha2 * exp2)
+        p_t = (exp1) / exp1 + exp2
 
         # mean across whole segment
         p_t = p_t.mean(dim=1)  # (batch × 1)
