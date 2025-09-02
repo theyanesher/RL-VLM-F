@@ -289,7 +289,7 @@ class RewardModel:
 
         # breakpoint()
         # per-timestep probability
-        p_t = (exp1) / exp1 + exp2
+        p_t = (exp1) / ( exp1 + exp2 )
 
         # mean across whole segment
         p_t = p_t.mean(dim=1)  # (batch × 1)
@@ -1158,8 +1158,8 @@ class RewardModel:
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
-                # curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
-                curr_loss = self.CEloss(r_hat, labels)
+                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                # curr_loss = self.CEloss(r_hat, labels)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
                 # breakpoint()
