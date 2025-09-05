@@ -90,7 +90,7 @@ class Offline_Workspace(object):
             
         self.image_height = image_height
         self.image_width = image_width
-
+        
         self.replay_buffer = ReplayBuffer(
             self.env.observation_space.shape,
             self.env.action_space.shape,
@@ -102,7 +102,7 @@ class Offline_Workspace(object):
         # for logging
         self.total_feedback = 0
         self.labeled_feedback = 0
-        self.step = 0
+        self.step = 0   
 
         # instantiating the reward model
         reward_model_class = RewardModel
@@ -117,10 +117,9 @@ class Offline_Workspace(object):
             OfflineDataset(self.data_path),
             batch_size= 2, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
             shuffle=True,
-            num_workers=4,
+            num_workers=0,
             drop_last=True
         )
-
         
         self.reward_model = reward_model_class(
             ### original PEBBLE parameters
@@ -167,7 +166,7 @@ class Offline_Workspace(object):
         
         if self.cfg.reward_model_load_dir != "None":
             print("loading reward model at {}".format(self.cfg.reward_model_load_dir))
-            self.reward_model.load(self.cfg.reward_model_load_dir, 1000000) 
+            self.reward_model.load(self.cfg.reward_model_load_dir, 299) 
                 
         # if self.cfg.agent_model_load_dir != "None":
         #     print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
@@ -300,7 +299,10 @@ class Offline_Workspace(object):
         #     shuffle=True,
         #     num_workers=4
         # )
-
+        if (self.reward_model.eval_steps+1) % self.cfg.eval_freq == 0:
+            self.reward_model.eval_model = True
+            self.reward_learning_acc = 0
+            return 0, 0
         # local tqdm for dataset loader
         for data in tqdm(self.dataset_loader, desc="Updating reward model", leave=False):
             self.reward_model.add_dataloader_data(data)
@@ -370,7 +372,7 @@ class Offline_Workspace(object):
             self.logger.log('train/reward_learning_acc', self.reward_learning_acc, self.step)
             self.logger.log('train/vlm_acc', vlm_acc, self.step)
             interact_count += 1
-            self.reward_model.eval_steps = self.step
+            self.reward_model.eval_steps += 1
 
             if self.step % self.cfg.save_interval == 0 and self.step > 0:
                 self.reward_model.save(model_save_dir, self.step)

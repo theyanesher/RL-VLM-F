@@ -11,7 +11,7 @@ import pickle as pkl
 import random
 import cv2
 import matplotlib.pyplot as plt
-
+import pickle as pkl
 # from prompt import (
 #     gemini_free_query_env_prompts, gemini_summary_env_prompts,
 #     gemini_free_query_prompt1, gemini_free_query_prompt2,
@@ -202,7 +202,7 @@ class RewardModel:
         self.buffer_tstep2 = np.empty((self.capacity, self.size_segment, 1), dtype=np.float32)
         self.buffer_index = 0
         self.buffer_full = False
-                
+
         self.construct_ensemble()
         self.inputs = []
         self.targets = []
@@ -255,10 +255,10 @@ class RewardModel:
         self.prox_flip = prox_flip
         self.flip_percent = flip_percent
         self.train_reward_loss = 0.0
-        
-        
+        self.reward_pkl_path = '/home/theya/RL-VLM-F/test_dummy/basketball/eval/data_eval_1.pkl'
+        self.eval_model = False
         self.cached_label_path = cached_label_path
-        # breakpoint()
+        # 
         if self.cached_label_path is not None:
             # file_path = os.path.abspath(__file__)
             # dir_path = os.path.dirname(file_path)
@@ -280,26 +280,30 @@ class RewardModel:
         return  -(target * logprobs).sum() / input.shape[0]
     
     def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2, tl_t_1, tl_t_2): # modified loss function
-        # breakpoint()
         alpha1 = (t_t_1/tl_t_1).to(device)
         alpha2 = (t_t_2/tl_t_2).to(device)
+        
+        r_hat = torch.cat([100*alpha1*r_hat_1, 100*alpha2*r_hat_2], axis=-1)
+                
+        loss = self.CEloss(r_hat, labels)
+        # 
 
-        exp1 = torch.exp(alpha1 * r_hat_1)
-        exp2 = torch.exp(alpha2 * r_hat_2)
+        exp1 = alpha1 * torch.exp(r_hat_1)
+        exp2 = alpha2 * torch.exp(r_hat_2)
 
-        # breakpoint()
-        # per-timestep probability
-        p_t = (exp1) / ( exp1 + exp2 )
+        # # 
+        # # per-timestep probability
+        # p_t = (exp1) / ( exp1 + exp2 )
 
         # mean across whole segment
-        p_t = p_t.mean(dim=1)  # (batch × 1)
+        # p_t = p_t.mean(dim=1)  # (batch × 1)
 
         # label: 0 → seg1 preferred, 1 → seg2 preferred
-        labels = labels.float().to(device)
+        # labels = labels.float().to(device)
 
-        # breakpoint()
+        # 
         # BCE loss
-        loss = F.binary_cross_entropy(p_t, labels)
+        # loss = F.binary_cross_entropy(p_t, labels)
         return loss
     
     def change_batch(self, new_frac):
@@ -334,7 +338,7 @@ class RewardModel:
     # def add_data(self, obs, act, rew, t_t, done, img=None):
     #     sa_t = np.concatenate([obs, act], axis=-1)
     #     r_t = rew
-    #     # breakpoint()
+    #     # 
     #     flat_input = sa_t.reshape(1, self.da+self.ds)
     #     r_t = np.array(r_t)
     #     t_t = np.array(t_t)
@@ -397,7 +401,7 @@ class RewardModel:
     #             self.timesteps[-1] = np.concatenate([self.timesteps[-1], flat_t_t])
     #             if img is not None:
     #                 self.img_inputs[-1] = np.concatenate([self.img_inputs[-1], flat_img], axis=0)
-                
+
     # def add_data_batch(self, obses, rewards, timesteps):
     #     num_env = obses.shape[0]
     #     for index in range(num_env):
@@ -405,13 +409,18 @@ class RewardModel:
     #         self.targets.append(rewards[index])
     #         self.timesteps.append(timesteps[index])
 
-    def eval_and_plot(self, sa_t, r_gt, title='Reward Model Evaluation'):
+    def eval_and_plot(self, reward_pkl_path, title='Reward Model Evaluation'):
         """
         eval_inputs: tensor of states/obs to evaluate on (N, d)
         eval_targets: tensor or array of ground truth rewards (N, 1) or (N,)
         wandb_run: wandb run object (self.wandb or externally provided)
         """
         self.eval()  # sets model to eval mode
+        with open(reward_pkl_path, 'rb') as f:
+            data = pkl.load(f)
+        sa_t = torch.from_numpy(data['images']).float().to(device)
+        sa_t = sa_t.permute(0,3,1,2)  # (N, H, W, C) to (N, C, H, W)
+        r_gt = torch.from_numpy(data['rewards']).float().to(device)
         
         with torch.no_grad():
             # Predict rewards (assume ensemble, get mean; adapt as needed!)
@@ -441,7 +450,7 @@ class RewardModel:
         self.train()  # revert to train mode
 
     def add_dataloader_data(self, dataloader):
-        # breakpoint()
+        # 
         self.inputs, self.targets, self.img_inputs, self.timesteps, self.traj_lens = dataloader
         # print('Loaded data from dataloader', self.inputs.shape, self.targets.shape, self.timesteps.shape, self.traj_lens.shape, self.img_inputs.shape)
         self.inputs = self.inputs.float().transpose(0,1).to(device)
@@ -568,10 +577,10 @@ class RewardModel:
         # print('len of data: ', len(self.inputs), self.inputs.shape)
         # print("Sampling batch of size: ", self.mb_size)
         # print('Sampling batch of size: ', self.mb_size)
-        # breakpoint()
+        # 
         # if self.mb_size < 150:
         #     print('mb error')
-            # breakpoint()
+            # 
         batch_index_1 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
         batch_index_2 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
 
@@ -584,14 +593,14 @@ class RewardModel:
         tl_t_1 = self.traj_lens[:,:1][batch_index_1]
         tl_t_2 = self.traj_lens[:,1:][batch_index_2]
         if self.vlm_label or self.image_reward:
-            # breakpoint()
+            # 
             img_t_1 = self.img_inputs[:,:1][batch_index_1]
             img_t_2 = self.img_inputs[:,1:][batch_index_2]
             # print(img_t_1.shape, self.img_inputs.shape)
         # print("Querying segments: ", sa_t_1.shape, img_t_1.shape)
         if sa_t_1.size(0) == 0 or sa_t_2.size(0) == 0:
             print("-----------------------------Warning: No samples in batch, skipping training step -----------------------------------------------------------------")
-            # breakpoint()
+            # 
         return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1 if (self.vlm_label or self.image_reward) else None, img_t_2 if (self.vlm_label or self.image_reward) else None
         
     
@@ -923,6 +932,7 @@ class RewardModel:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2, labels = self.get_label(
                     sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2)
                 # print("Uniform sampling: got labels", sa_t_1.shape, img_t_1.shape)
+                # 
         else:
             if self.cached_label_path is None:
                 sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, img_t_1, img_t_2 =  self.get_queries(
@@ -954,6 +964,7 @@ class RewardModel:
                     gt_labels = []
                 
             labels = vlm_labels
+            # 
             if self.use_gt_label:
                 labels = gt_labels
             if self.flip_label and len(labels)>0:
@@ -1026,7 +1037,7 @@ class RewardModel:
                     # labels.ravel()[indices_to_flip] = ~labels.ravel()[indices_to_flip]
                     labels.ravel()[indices_to_flip] = 1 - labels.ravel()[indices_to_flip]
             
-        # breakpoint()
+        # 
         # if len(labels) > 0:
         #     if not self.image_reward:
         #         self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
@@ -1124,7 +1135,6 @@ class RewardModel:
                 # labels = torch.from_numpy(labels.flatten()).long().to(device)
                 # print(f"Member {member} sampling")
                 sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, r_t_1, r_t_2, labels = self.uniform_sampling()
-                    
                 if member == 0:
                     total += len(labels)
                 if sa_t_1.size(0) == 0 or sa_t_2.size(0) == 0 or len(labels) == 0:
@@ -1141,10 +1151,11 @@ class RewardModel:
                     sa_t_11 = sa_t_1.squeeze(1)
                     sa_t_22 = sa_t_2.squeeze(1)
                     # print(sa_t_11.shape, sa_t_22.shape)
-                    # breakpoint()
-
-                if self.eval_steps+1 % 50 == 0:
-                    self.eval_and_plot(sa_t_11, r_t_1)
+                    # 
+                # print('eval steps', self.eval_steps)
+                if self.eval_model:
+                    self.eval_and_plot(self.reward_pkl_path)
+                    self.eval_model = False
                     print("Eval and plot done")
                     return self.ensemble_acc
 
@@ -1154,7 +1165,7 @@ class RewardModel:
                 if not self.image_reward:
                     r_hat1 = r_hat1.sum(axis=1)
                     r_hat2 = r_hat2.sum(axis=1)
-                # breakpoint()
+                # 
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
@@ -1162,10 +1173,10 @@ class RewardModel:
                 # curr_loss = self.CEloss(r_hat, labels)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
-                # breakpoint()
+                # 
                 
                 # compute acc
-                # breakpoint()
+                # 
                 _, predicted = torch.max(r_hat.data, 1)
                 # predicted = predicted.to(device)
                 # labels = labels.to(device)
@@ -1174,10 +1185,11 @@ class RewardModel:
 
                 if self.wandb is not None:
                     self.wandb.log({f"{member}_loss" : curr_loss.item(), f"{member}_acc" : correct/len(labels)})
-                # breakpoint()
+                # 
             self.train_reward_loss = loss.item()
             loss.backward()
             self.opt.step()
+            
         
         ensemble_acc = ensemble_acc / total
         self.ensemble_acc = ensemble_acc
