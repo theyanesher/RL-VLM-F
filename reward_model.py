@@ -587,8 +587,21 @@ class RewardModel:
         # if self.mb_size < 150:
         #     print('mb error')
             # 
+
         batch_index_1 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
-        batch_index_2 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
+        batch_index_2 = []
+
+        # later on add a wrapper function for this
+        for idx in batch_index_1:
+            tstep = self.timesteps[idx]                # current timestep
+            traj_len = self.traj_lens[idx]             # length of the current trajectory we are in
+            traj_start = max(0,idx - tstep)            # start index of the current trajectory
+            traj_end = min(250,idx + traj_len - tstep) # end index of the current trajectory, change 250 to cfg.pkl_length
+
+            # now randomly sample from the segment self.inputs[traj_start, traj_end]
+            sampled_idx = np.random.randint(traj_start, traj_end)
+            # then append those sampled indices
+            batch_index_2.append(sampled_idx)
 
         sa_t_1 = self.inputs[batch_index_1]
         sa_t_2 = self.inputs[batch_index_2]
@@ -644,25 +657,20 @@ class RewardModel:
         sum_r_t_1 = torch.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = torch.sum(temp_r_t_2, axis=1)
 
-        avg_t_1 = torch.mean(t_t_1, axis=1) # calculate average timestep for segments 
-        avg_t_2 = torch.mean(t_t_2, axis=1)
-
-        traj_len = 201 # CHANGE THIS, calculate from somewhere or do something else, needs to be changed
-        alpha1 = avg_t_1 / traj_len # how to find trajectory length?
-        alpha2 = avg_t_2 / traj_len
-
             
-        rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
+        # rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
+        rational_labels = 1*(t_t_1 < t_t_2) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
+
         if self.teacher_beta > 0: # Bradley-Terry rational model
-            # r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
-            #                 torch.Tensor(sum_r_t_2)], axis=-1)
-            # r_hat = r_hat*self.teacher_beta
-            # ent = F.softmax(r_hat, dim=-1)[:, 1]
-            logits1 = alpha1 * torch.exp(sum_r_t_1)
-            logits2 = alpha2 * torch.exp(sum_r_t_2)
-            prob_seg2 = logits2 / (logits1 + logits2)          # P(segment-2 preferred)
-            labels = torch.random.binomial(1, prob_seg2).reshape(-1, 1)
-            # labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
+            r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
+                            torch.Tensor(sum_r_t_2)], axis=-1)
+            r_hat = r_hat*self.teacher_beta
+            ent = F.softmax(r_hat, dim=-1)[:, 1]
+            # logits1 = alpha1 * torch.exp(sum_r_t_1)
+            # logits2 = alpha2 * torch.exp(sum_r_t_2)
+            # prob_seg2 = logits2 / (logits1 + logits2)          # P(segment-2 preferred)
+            # labels = torch.random.binomial(1, prob_seg2).reshape(-1, 1)
+            labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
         else:
             labels = rational_labels
         
