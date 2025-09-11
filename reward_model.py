@@ -286,24 +286,28 @@ class RewardModel:
         r_hat = torch.cat([100*alpha1*r_hat_1, 100*alpha2*r_hat_2], axis=-1)
                 
         loss = self.CEloss(r_hat, labels)
-        # 
-
 
         return loss
     
     def regoLoss1(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2, tl_t_1, tl_t_2): # modified loss function
+        alpha1 = torch.log((t_t_1/tl_t_1)).to(device)
+        alpha2 = torch.log((t_t_2/tl_t_2).to(device))
+
+        r_hat = torch.cat([alpha1+r_hat_1, alpha2+r_hat_2], axis=-1)
+        
+        loss = self.CEloss(r_hat, labels)
+
+        return loss
+    
+    def regoLoss2(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2, tl_t_1, tl_t_2):
         alpha1 = (t_t_1/tl_t_1).to(device)
         alpha2 = (t_t_2/tl_t_2).to(device)
-        labels = labels.unsqueeze(1)
-        # alpha = torch.cat([alpha1, alpha2], axis=-1)
-        exp1 = alpha1 * torch.exp(r_hat_1)
-        exp2 = alpha2 * torch.exp(r_hat_2)
-        prob_seg1 = exp1 / (exp1 + exp2)          # P(segment-2 preferred)
-        loss = (1-labels)*torch.log(prob_seg1) + (labels)*torch.log(1-prob_seg1)
 
-        # breakpoint()
-        loss = -torch.mean(loss)
+        scale_const = max(tl_t_1,tl_t_2)
         
+        r_hat = torch.cat([scale_const*alpha1*r_hat_1, scale_const*alpha2*r_hat_2], axis=-1)
+                
+        loss = self.CEloss(r_hat, labels)
 
         return loss
 
