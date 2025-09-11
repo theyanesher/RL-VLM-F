@@ -20,16 +20,16 @@ def save_frame(path, frame):
 
 
 collection_config = {
-    "demos": 300,
+    "demos": 2000,
     "output_path": "/home/theya/RL-VLM-F/test_dummy",
     "resolution": (300, 300),
     "safety": 0, ### discard the last {ratio} of the collected videos (preventing failed episodes)
-    "pkl_length": 300, #save pkl after this many transitions
+    "pkl_length": 250, #save pkl after this many transitions
     "eval_demos": 1 #number of eval demos to collect
 }
 
 
-included_tasks = ['basketball-v2-goal-observable'] #for passing to the call_diff_agent use the env name without the goal observable
+included_tasks = ['drawer-open-v2-goal-observable'] #for passing to the call_diff_agent use the env name without the goal observable
 # included_tasks = [t + "-v2-goal-observable" for t in included_tasks]
 #included_tasks = ['assembly-v2-goal-observable', 'basketball-v2-goal-observable', 'bin-picking-v2-goal-observable', 'box-close-v2-goal-observable', 'button-press-topdown-v2-goal-observable', 'button-press-topdown-wall-v2-goal-observable', 'button-press-v2-goal-observable', 'button-press-wall-v2-goal-observable', 'coffee-button-v2-goal-observable', 'coffee-pull-v2-goal-observable', 'coffee-push-v2-goal-observable', 'dial-turn-v2-goal-observable', 'disassemble-v2-goal-observable', 'door-close-v2-goal-observable', 'door-lock-v2-goal-observable', 'door-open-v2-goal-observable', 'door-unlock-v2-goal-observable', 'hand-insert-v2-goal-observable', 'drawer-close-v2-goal-observable', 'drawer-open-v2-goal-observable', 'faucet-open-v2-goal-observable', 'faucet-close-v2-goal-observable', 'hammer-v2-goal-observable', 'handle-press-side-v2-goal-observable', 'handle-press-v2-goal-observable', 'handle-pull-side-v2-goal-observable', 'handle-pull-v2-goal-observable', 'lever-pull-v2-goal-observable', 'pick-place-wall-v2-goal-observable', 'pick-out-of-hole-v2-goal-observable', 'reach-v2-goal-observable', 'push-back-v2-goal-observable', 'push-v2-goal-observable', 'pick-place-v2-goal-observable', 'plate-slide-v2-goal-observable', 'plate-slide-side-v2-goal-observable', 'plate-slide-back-v2-goal-observable', 'plate-slide-back-side-v2-goal-observable', 'peg-unplug-side-v2-goal-observable', 'soccer-v2-goal-observable', 'stick-push-v2-goal-observable', 'stick-pull-v2-goal-observable', 'push-wall-v2-goal-observable', 'reach-wall-v2-goal-observable', 'shelf-place-v2-goal-observable', 'sweep-into-v2-goal-observable', 'sweep-v2-goal-observable', 'window-open-v2-goal-observable', 'window-close-v2-goal-observable']
 
@@ -292,8 +292,3 @@ for task in tqdm(included_tasks):
             pickle.dump(data_to_save, f)
 
 print("Completed data collection for all tasks")
-      
-    
-    
-        
-        

@@ -40,7 +40,7 @@ class Offline_Workspace(object):
         
         self.wandb = wandb.init(
             project="pebble-offline-rl",  # Or any project name you prefer
-            name=f"{self.cfg.env}-{time.strftime('%Y%m%d-%H%M%S')}",
+            name=f"{self.cfg.wandb_name}-{time.strftime('%Y%m%d-%H%M%S')}",
             # config=dict(cfg), # Log the entire hydra config
             job_type="train"
         )
@@ -48,8 +48,8 @@ class Offline_Workspace(object):
         utils.set_seed_everywhere(cfg.seed)
         self.device = torch.device(cfg.device)
         self.log_success = False
-        with open(cfg.dataset_path, 'rb') as f:
-                self.dataset = pkl.load(f)
+        # with open(cfg.dataset_path, 'rb') as f:
+        #         self.dataset = pkl.load(f)
         
         current_file_path = os.path.dirname(os.path.realpath(__file__))
         os.system("cp {}/prompt.py {}/".format(current_file_path, self.logger._log_dir))
@@ -115,7 +115,7 @@ class Offline_Workspace(object):
 
         self.dataset_loader = DataLoader(
             OfflineDataset(self.data_path),
-            batch_size= 2, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
+            batch_size= 1, #self.cfg.dataloader_batch_size,  # e.g., 8 or 16
             shuffle=True,
             num_workers=0,
             drop_last=True
@@ -166,7 +166,7 @@ class Offline_Workspace(object):
         
         if self.cfg.reward_model_load_dir != "None":
             print("loading reward model at {}".format(self.cfg.reward_model_load_dir))
-            self.reward_model.load(self.cfg.reward_model_load_dir, 299) 
+            self.reward_model.load(self.cfg.reward_model_load_dir, 400) 
                 
         # if self.cfg.agent_model_load_dir != "None":
         #     print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
@@ -317,7 +317,7 @@ class Offline_Workspace(object):
 
             total_acc = np.mean(train_acc)
 
-            # if total_acc > 0.97:
+            # if total_acc > 0.98:
             #     break
 
             # if self.reward == 'learn_from_preference':
