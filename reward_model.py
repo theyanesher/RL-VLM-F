@@ -255,7 +255,7 @@ class RewardModel:
         self.prox_flip = prox_flip
         self.flip_percent = flip_percent
         self.train_reward_loss = 0.0
-        self.reward_pkl_path = '/home/theya/RL-VLM-F/test_dummy/drawer-open/eval/data_eval_1.pkl'
+        self.reward_pkl_path = '/share1/RL-VLM-F/test_dummy/drawer-open/eval/data_eval_1.pkl'
         self.eval_model = False
         self.cached_label_path = cached_label_path
         # 

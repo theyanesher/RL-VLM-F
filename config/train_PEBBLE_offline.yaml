@@ -84,9 +84,9 @@ reward_model_score_load_dir: "None"
 agent_model_load_dir: "None"
 mode: train
 save_images: false
-data_path: '/home/theya/RL-VLM-F/test_dummy/drawer-open/expert'
+data_path: '/share1/RL-VLM-F/test_dummy/drawer-open/expert'
 
-dataset_path: '/home/theya/RL-VLM-F/test_dummy/drawer-open/expert/data_0.pkl'
+dataset_path: '/share1/RL-VLM-F/test_dummy/drawer-open/expert/data_0.pkl'
 
 # hydra configuration
 hydra:
