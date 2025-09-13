@@ -11,6 +11,7 @@ import pickle as pkl
 import random
 import cv2
 import matplotlib.pyplot as plt
+import yaml
 import pickle as pkl
 # from prompt import (
 #     gemini_free_query_env_prompts, gemini_summary_env_prompts,
@@ -21,7 +22,7 @@ import pickle as pkl
 # from vlms.gemini_infer import gemini_query_2, gemini_query_1
 from conv_net import CNN, fanin_init
 
-device = 'cuda:0'
+device = 'cuda:1'
 
 def gen_net(in_size=1, out_size=1, H=128, n_layers=3, activation='tanh'):
     net = []
@@ -162,6 +163,19 @@ class RewardModel:
                 **kwargs
                 ):
         
+        # Load YAML file
+        with open("/home/agv/rego/RL-VLM-F/config/train_PEBBLE_offline.yaml", "r") as f:
+            self.config = yaml.safe_load(f)
+        
+        if self.config['loss'] == 'rego':
+            print('Using reGo loss with alpha inside')
+        elif self.config['loss'] == 'ce':
+            print('Using cross-entropy loss')
+        elif self.config['loss'] == 'rego1':
+            print('Using reGo1 loss with alpha outside')
+        elif self.config['loss'] == 'rego2':
+            print('Using reGo2 loss with tl_scale')
+
         # train data is trajectories, must process to sa and s..   
         self.ds = ds
         self.da = da
@@ -255,7 +269,7 @@ class RewardModel:
         self.prox_flip = prox_flip
         self.flip_percent = flip_percent
         self.train_reward_loss = 0.0
-        self.reward_pkl_path = '/home/theya/RL-VLM-F/test_dummy/drawer-open/eval/data_eval_1.pkl'
+        self.reward_pkl_path = '/share1/RL-VLM-F/test_dummy/drawer-open/eval/data_eval_1.pkl'
         self.eval_model = False
         self.cached_label_path = cached_label_path
         # 
@@ -303,7 +317,8 @@ class RewardModel:
         alpha1 = (t_t_1/tl_t_1).to(device)
         alpha2 = (t_t_2/tl_t_2).to(device)
 
-        scale_const = max(tl_t_1,tl_t_2)
+        scale_const = torch.max(torch.max(tl_t_1), torch.max(tl_t_2))
+
         
         r_hat = torch.cat([scale_const*alpha1*r_hat_1, scale_const*alpha2*r_hat_2], axis=-1)
                 
@@ -1055,8 +1070,14 @@ class RewardModel:
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
-                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
-                # curr_loss = self.CEloss(r_hat, labels)
+                if self.config['loss'] == 'rego':
+                    curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                elif self.config['loss'] == 'ce':
+                    curr_loss = self.CEloss(r_hat, labels)
+                elif self.config['loss'] == 'rego1':
+                    curr_loss = self.regoLoss1(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                elif self.config['loss'] == 'rego2':
+                    curr_loss = self.regoLoss2(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
                 # 

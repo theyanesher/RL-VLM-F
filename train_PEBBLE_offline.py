@@ -46,7 +46,7 @@ class Offline_Workspace(object):
         )
         
         utils.set_seed_everywhere(cfg.seed)
-        self.device = torch.device(cfg.device)
+        self.device = torch.device('cuda:1')
         self.log_success = False
         # with open(cfg.dataset_path, 'rb') as f:
         #         self.dataset = pkl.load(f)
@@ -428,6 +428,7 @@ class Offline_Workspace(object):
 def main(cfg):
     workspace = Offline_Workspace(cfg)
     print("Save interval :", cfg.save_interval)
+    print('config_params: flip:', cfg.flip_percent, 'loss', cfg.loss)
     if cfg.mode == 'eval':
         workspace.evaluate(save_additional=cfg.save_images)
         exit()
