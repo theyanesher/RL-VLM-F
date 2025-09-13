@@ -300,7 +300,7 @@ class RewardModel:
         
         r_hat = torch.cat([100*alpha1*r_hat_1, 100*alpha2*r_hat_2], axis=-1)
                 
-        loss = self.CEloss(r_hat, labels.squeeze().long())
+        loss = self.CEloss(r_hat, labels.squeeze())
 
         return loss
     
