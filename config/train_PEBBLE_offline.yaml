@@ -51,7 +51,8 @@ seed: 1
 # Environment
 env: metaworld_drawer-open-v2
 gradient_update: 1
-wandb_name: drawer_open-alpha-inside
+wandb_name: drawer_open-time-label-rego-0.25
+loss: rego
 # vlm label
 vlm_label: 0
 vlm: bard
@@ -70,7 +71,7 @@ cached_label_path: null
 use_gt_label: false
 flip_label: True
 prox_flip: false
-flip_percent: 0.1
+flip_percent: 0.25
 
 # exp_name
 exp_name: gemini_template_1

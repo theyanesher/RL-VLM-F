@@ -11,6 +11,7 @@ import pickle as pkl
 import random
 import cv2
 import matplotlib.pyplot as plt
+import yaml
 import pickle as pkl
 # from prompt import (
 #     gemini_free_query_env_prompts, gemini_summary_env_prompts,
@@ -21,7 +22,7 @@ import pickle as pkl
 # from vlms.gemini_infer import gemini_query_2, gemini_query_1
 from conv_net import CNN, fanin_init
 
-device = 'cuda:0'
+device = 'cuda:1'
 
 def gen_net(in_size=1, out_size=1, H=128, n_layers=3, activation='tanh'):
     net = []
@@ -213,6 +214,20 @@ class RewardModel:
         self.mb_size = mb_size
         self.origin_mb_size = mb_size
         self.eval_steps = 0
+
+        # Load YAML file
+        with open("/home/agv/rego/RL-VLM-F/config/train_PEBBLE_offline.yaml", "r") as f:
+            self.config = yaml.safe_load(f)
+        
+        if self.config['loss'] == 'rego':
+            print('Using reGo loss with alpha inside')
+        elif self.config['loss'] == 'ce':
+            print('Using cross-entropy loss')
+        elif self.config['loss'] == 'rego1':
+            print('Using reGo1 loss with alpha outside')
+        elif self.config['loss'] == 'rego2':
+            print('Using reGo2 loss with tl_scale')
+
         if not image_reward:
             self.train_batch_size = 128
         else:
@@ -595,17 +610,18 @@ class RewardModel:
         for idx in batch_index_1:
             tstep = self.timesteps[idx]                # current timestep
             traj_len = self.traj_lens[idx]             # length of the current trajectory we are in
-            traj_start = max(0,idx - tstep)            # start index of the current trajectory
-            traj_end = min(250,idx + traj_len - tstep) # end index of the current trajectory, change 250 to cfg.pkl_length
+            traj_start = max(0,idx - tstep + 1)            # start index of the current trajectory
+            traj_end = min(250,idx + traj_len - tstep + 1)  # end index of the current trajectory, change 250 to cfg.pkl_length
 
             # try to fix numpy and tensor error
             traj_start = int(traj_start.cpu().item()) if torch.is_tensor(traj_start) else int(traj_start)
             traj_end   = int(traj_end.cpu().item()) if torch.is_tensor(traj_end) else int(traj_end)
-
+            # print(traj_start, traj_end, idx)
             # now randomly sample from the segment self.inputs[traj_start, traj_end]
             sampled_idx = np.random.randint(traj_start, traj_end)
             # then append those sampled indices
             batch_index_2.append(sampled_idx)
+        # breakpoint()
 
         sa_t_1 = self.inputs[batch_index_1]
         sa_t_2 = self.inputs[batch_index_2]
@@ -661,7 +677,6 @@ class RewardModel:
         sum_r_t_1 = torch.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = torch.sum(temp_r_t_2, axis=1)
 
-            
         # rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
         rational_labels = 1*(t_t_1 < t_t_2) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
 
@@ -1067,8 +1082,15 @@ class RewardModel:
                 r_hat = torch.cat([r_hat1, r_hat2], axis=-1)
 
                 # compute loss
-                curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
-                # curr_loss = self.CEloss(r_hat, labels)
+                if self.config['loss'] == 'rego':
+                    curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                elif self.config['loss'] == 'ce':
+                    curr_loss = self.CEloss(r_hat, labels.squeeze())
+                elif self.config['loss'] == 'rego1':
+                    curr_loss = self.regoLoss1(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+                elif self.config['loss'] == 'rego2':
+                    curr_loss = self.regoLoss2(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
+
                 loss += curr_loss
                 ensemble_losses[member].append(curr_loss.item())
                 # 

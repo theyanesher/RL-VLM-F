@@ -48,7 +48,7 @@ class Offline_Workspace(object):
         )
         
         utils.set_seed_everywhere(cfg.seed)
-        self.device = torch.device(cfg.device)
+        self.device = torch.device('cuda:1')
         self.log_success = False
         # with open(cfg.dataset_path, 'rb') as f:
         #         self.dataset = pkl.load(f)
