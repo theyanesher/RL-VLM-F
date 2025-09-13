@@ -285,7 +285,7 @@ class RewardModel:
         
         r_hat = torch.cat([100*alpha1*r_hat_1, 100*alpha2*r_hat_2], axis=-1)
                 
-        loss = self.CEloss(r_hat, labels)
+        loss = self.CEloss(r_hat, labels.squeeze().long())
 
         return loss
     
@@ -597,6 +597,10 @@ class RewardModel:
             traj_len = self.traj_lens[idx]             # length of the current trajectory we are in
             traj_start = max(0,idx - tstep)            # start index of the current trajectory
             traj_end = min(250,idx + traj_len - tstep) # end index of the current trajectory, change 250 to cfg.pkl_length
+
+            # try to fix numpy and tensor error
+            traj_start = int(traj_start.cpu().item()) if torch.is_tensor(traj_start) else int(traj_start)
+            traj_end   = int(traj_end.cpu().item()) if torch.is_tensor(traj_end) else int(traj_end)
 
             # now randomly sample from the segment self.inputs[traj_start, traj_end]
             sampled_idx = np.random.randint(traj_start, traj_end)
