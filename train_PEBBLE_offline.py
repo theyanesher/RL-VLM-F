@@ -23,6 +23,8 @@ from vlms.blip_infer_2 import blip2_image_text_matching
 from vlms.clip_infer import clip_infer_score as clip_image_text_matching
 import cv2
 
+# Hello WAWU : )
+
 class Offline_Workspace(object):
     def __init__(self, cfg):
         self.work_dir = os.getcwd()
