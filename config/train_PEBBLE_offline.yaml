@@ -51,8 +51,8 @@ seed: 1
 # Environment
 env: metaworld_drawer-open-v2
 gradient_update: 1
-wandb_name: drawer_open-time-label-rego-0.25
-loss: rego
+wandb_name: drawer_open-time-label-ce-0.25
+loss: ce
 # vlm label
 vlm_label: 0
 vlm: bard

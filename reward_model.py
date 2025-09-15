@@ -678,8 +678,23 @@ class RewardModel:
         sum_r_t_1 = torch.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = torch.sum(temp_r_t_2, axis=1)
 
-        rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
-        rational_labels[:0.4*self.mb_size] = 1*(t_t_1[:0.4*self.mb_size] < t_t_2[:0.4*self.mb_size]) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
+        # split_idx = int(0.4*self.mb_size)
+        # breakpoint()
+        
+        # rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
+        # rational_labels[:split_idx] = 1*(t_t_1[:split_idx,:] < t_t_2[:split_idx,:]) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
+
+        # --------- SPLIT 40% / 60% ----------
+        n = sum_r_t_1.shape[0]
+        split_idx = int(0.4 * n)
+
+        # time-based labels (40%)
+        rational_labels = torch.zeros((n, 1), dtype=torch.long, device=sum_r_t_1.device)
+        rational_labels[:split_idx] = (t_t_1[:split_idx] < t_t_2[:split_idx]).long().reshape(-1, 1)
+
+        # reward-based labels (60%)
+        rational_labels[split_idx:] = (sum_r_t_1[split_idx:] < sum_r_t_2[split_idx:]).long().reshape(-1, 1)
+
 
         if self.teacher_beta > 0: # Bradley-Terry rational model
             r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
