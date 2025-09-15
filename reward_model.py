@@ -621,6 +621,7 @@ class RewardModel:
             sampled_idx = np.random.randint(traj_start, traj_end)
             # then append those sampled indices
             batch_index_2.append(sampled_idx)
+
         # breakpoint()
 
         sa_t_1 = self.inputs[batch_index_1]
@@ -677,8 +678,8 @@ class RewardModel:
         sum_r_t_1 = torch.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = torch.sum(temp_r_t_2, axis=1)
 
-        # rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
-        rational_labels = 1*(t_t_1 < t_t_2) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
+        rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
+        rational_labels[:0.4*self.mb_size] = 1*(t_t_1[:0.4*self.mb_size] < t_t_2[:0.4*self.mb_size]) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
 
         if self.teacher_beta > 0: # Bradley-Terry rational model
             r_hat = torch.cat([torch.Tensor(sum_r_t_1), 
