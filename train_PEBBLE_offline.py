@@ -348,7 +348,6 @@ class Offline_Workspace(object):
 
         # global tqdm for training steps
         for self.step in tqdm(range(int(self.cfg.num_train_steps)), desc="Global training progress"):
-            
             # reward scheduling
             if self.cfg.reward_schedule == 1:
                 frac = (self.cfg.num_train_steps - self.step) / self.cfg.num_train_steps
@@ -358,69 +357,29 @@ class Offline_Workspace(object):
                 frac = self.cfg.num_train_steps / (self.cfg.num_train_steps - self.step + 1)
             else:
                 frac = 1
-            
             self.reward_model.change_batch(frac)
-            
-            # First time reward learning and policy training
-            if self.step == 0:  # First step for offline learning
-                reward_learning_acc, vlm_acc = self.learn_reward()
-                
-                # Relabel buffer using learned reward model
-                self.reward_model.eval()
-                self.replay_buffer.relabel_with_predictor(self.reward_model)
-                self.reward_model.train()
-                
-                # Reset critic and update policy for first time
-                self.agent.reset_critic()
-                self.agent.update_after_reset(
-                    self.replay_buffer, self.logger, self.step,
-                    gradient_update=getattr(self.cfg, 'reset_update', 100),
-                    policy_update=True)
-                
-                interact_count = 0
-                
-            # Regular training loop
-            else:
-                # Update reward model periodically
-                if interact_count >= getattr(self.cfg, 'num_interact', 5000):
-                    reward_learning_acc, vlm_acc = self.learn_reward()
-                    
-                    # Relabel buffer with updated reward model
-                    self.reward_model.eval()
-                    self.replay_buffer.relabel_with_predictor(self.reward_model)
-                    self.reward_model.train()
-                    
-                    interact_count = 0
-                
-                # Train policy with current reward model
-                self.agent.update(self.replay_buffer, self.logger, self.step, 1)
-            
+
+            # if self.reward_model.mb_size + self.total_feedback > self.cfg.max_feedback:
+            #     self.reward_model.set_batch(self.cfg.max_feedback - self.total_feedback)
+
+            reward_learning_acc, vlm_acc = self.learn_reward()
             print("reward learn", self.reward_learning_acc)
-            
+
+            interact_count = 0
+
             self.wandb.log({
                 "accuracy": self.reward_model.ensemble_acc,
                 "loss": self.reward_model.train_reward_loss
             })
-            
             self.logger.log('train/reward_learning_acc', self.reward_learning_acc, self.step)
             self.logger.log('train/vlm_acc', vlm_acc, self.step)
-            
             interact_count += 1
             self.reward_model.eval_steps += 1
-            
-            # Periodic evaluation
-            if self.step > 0 and self.step % getattr(self.cfg, 'eval_frequency', 5000) == 0:
-                self.evaluate()
-            
-            # Save models
+
             if self.step % self.cfg.save_interval == 0 and self.step > 0:
-                self.agent.save(model_save_dir, self.step)
                 self.reward_model.save(model_save_dir, self.step)
 
-        # Final save
-        self.agent.save(model_save_dir, self.step)
         self.reward_model.save(model_save_dir, self.step)
-
     
     def load_dataset_to_buffer(self):
         size = len(self.dataset["observations"])
