@@ -4,6 +4,8 @@ import torch
 import os
 import time
 import pickle as pkl
+import glob
+from collections import defaultdict
 
 from logger import Logger
 from replay_buffer import ReplayBuffer
@@ -17,20 +19,15 @@ import utils
 import hydra
 from PIL import Image
 
-from vlms.blip_infer_2 import blip2_image_text_matching
-from vlms.clip_infer import clip_infer_score as clip_image_text_matching
 import cv2
 
 
-    
 class Relabel_class(object):
     def __init__(self, cfg):
         self.work_dir = os.getcwd()
         print(f'workspace: {self.work_dir}')
 
         self.cfg = cfg
-        # self.cfg.prompt = clip_env_prompts[cfg.env]
-        # self.cfg.clip_prompt = clip_env_prompts[cfg.env]
         self.reward = self.cfg.reward # what types of reward to use
         self.logger = Logger(
             self.work_dir,
@@ -56,16 +53,6 @@ class Relabel_class(object):
         else:
             self.env = utils.make_env(cfg)
         
-        # cfg.agent.params.obs_dim = self.env.observation_space.shape[0]
-        # cfg.agent.params.action_dim = self.env.action_space.shape[0]
-        # cfg.agent.params.action_range = [
-        #     float(self.env.action_space.low.min()),
-        #     float(self.env.action_space.high.max())
-        # ]
-        # self.agent = hydra.utils.instantiate(cfg.agent)
-        
-        # image_height = image_width = cfg.image_size
-        
         self.resize_factor = 1
         if "sweep" in cfg.env or 'drawer' in cfg.env or "soccer" in cfg.env:
             image_height = image_width = 300 
@@ -82,19 +69,6 @@ class Relabel_class(object):
             
         self.image_height = image_height
         self.image_width = image_width
-
-        # self.replay_buffer = ReplayBuffer(
-        #     self.env.observation_space.shape,
-        #     self.env.action_space.shape,
-        #     int(cfg.replay_buffer_capacity) if not self.cfg.image_reward else 20000, # we cannot afford to store too many images in the replay buffer.
-        #     self.device,
-        #     store_image=self.cfg.image_reward,
-        #     image_size=image_height)
-        
-        # # for logging
-        # self.total_feedback = 0
-        # self.labeled_feedback = 0
-        # self.step = 0
 
         # instantiating the reward model
         reward_model_class = RewardModel
@@ -143,12 +117,8 @@ class Relabel_class(object):
         
         if self.cfg.reward_model_load_dir != "None":
             print("loading reward model at {}".format(self.cfg.reward_model_load_dir))
-            self.reward_model.load(self.cfg.reward_model_load_dir, 500000) 
+            self.reward_model.load(self.cfg.reward_model_load_dir, 200) 
                 
-        if self.cfg.agent_model_load_dir != "None":
-            print("loading agent model at {}".format(self.cfg.agent_model_load_dir))
-            self.agent.load(self.cfg.agent_model_load_dir, 500000) 
-        
     
     def relabel(self, data):
         if not self.cfg.image_reward:
@@ -176,21 +146,66 @@ class Relabel_class(object):
                 inputs = np.transpose(inputs, (0, 3, 1, 2))
                 inputs = inputs.astype(np.float32) / 255.0
 
+            # Convert numpy array to torch tensor and move to the correct device
+            inputs = torch.from_numpy(inputs).float().to(self.device)
             pred_reward = self.reward_model.r_hat_batch(inputs)
             data["rewards_pred"][index*batch_size:last_index] = np.squeeze(pred_reward)
         torch.cuda.empty_cache()        
         
         
-@hydra.main(config_path='config/train_PEBBLE.yaml', strict=True)
+@hydra.main(config_path='config/train_PEBBLE_offline.yaml', strict=True)
 def main(cfg):
     workspace = Relabel_class(cfg)
-    with open("/home/sreyas/RL-VLM-F/RL-VLM-F/exp/datagen_PassWater/softgym_PassWater/2024-07-21-03-45-32/vlm_1gemini_free_form_rewardlearn_from_preference_H256_L3_lr0.0003/teacher_b-1_g1_m0_s0_e0/label_smooth_0.0/schedule_0/datagen_PassWater_init1000_unsup9000_inter5000_maxfeed20000_seg1_acttanh_Rlr0.0001_Rbatch100_Rupdate30_en3_sample0_large_batch10_seed0/data.pkl", 'rb') as f:
-        data = pkl.load(f)
-    workspace.relabel(data)
-    print(len(data["rewards_pred"]))
-    demo_dir = "/home/sreyas/RL-VLM-F/RL-VLM-F/exp/datagen_PassWater/softgym_PassWater/2024-07-21-03-45-32/vlm_1gemini_free_form_rewardlearn_from_preference_H256_L3_lr0.0003/teacher_b-1_g1_m0_s0_e0/label_smooth_0.0/schedule_0/datagen_PassWater_init1000_unsup9000_inter5000_maxfeed20000_seg1_acttanh_Rlr0.0001_Rbatch100_Rupdate30_en3_sample0_large_batch10_seed0/"
-    with open(f"{demo_dir}/data_replay_pred.pkl", "wb") as f:
-        pkl.dump(data, f)
+    
+    data_directory = "/share1/RL-VLM-F/test_dummy/soccer/expert" # for soccer
+    input_files = glob.glob(os.path.join(data_directory, '*.pkl'))
+
+    if not input_files:
+        print(f"Error: No '.pkl' files found in '{data_directory}'. Please check the path.")
+        return
+
+    print(f"Found {len(input_files)} files to process:")
+    for f_path in input_files:
+        print(f"  - {f_path}")
+
+    # 2. Load and combine data from all found pkl files.
+    all_data_lists = defaultdict(list)
+    for file_path in input_files:
+        print(f"Loading data from: {file_path}")
+        with open(file_path, 'rb') as f:
+            data = pkl.load(f)
+            for key, value in data.items():
+                all_data_lists[key].append(value)
+
+    print("\nCombining all loaded data...")
+    combined_data = {}
+    for key, value_list in all_data_lists.items():
+        # Concatenate numpy arrays from each file along the first axis (batch dimension)
+        combined_data[key] = np.concatenate(value_list, axis=0)
+        print(f"  - Combined shape for '{key}': {combined_data[key].shape}")
+
+    # free memory before next operation
+    print("\nFreeing up memory before relabeling...")
+    del all_data_lists
+    import gc
+    gc.collect()
+
+    # relabel the entire combined dataset
+    print("\nStarting the relabeling process on the combined data...")
+    workspace.relabel(combined_data)
+    print("Relabeling complete.")
+
+    # save the combined and relabeled data to a single new pkl file
+    output_dir = workspace.work_dir
+    output_path = os.path.join('/share1', "replayed_combined_data.pkl")
+    print(f"\nSaving new dataset to: {output_path}")
+    with open(output_path, "wb") as f:
+        # using a higher protocol can be more efficient for large objects
+        pkl.dump(combined_data, f, protocol=pkl.HIGHEST_PROTOCOL)
+
+    print("\nProcess finished successfully!")
+    print(f"Total entries in the final dataset: {len(combined_data['rewards_pred'])}")
 
 if __name__ == '__main__':
     main()
+

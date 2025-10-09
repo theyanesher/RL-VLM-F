@@ -13,16 +13,12 @@ import cv2
 import matplotlib.pyplot as plt
 import yaml
 import pickle as pkl
-# from prompt import (
-#     gemini_free_query_env_prompts, gemini_summary_env_prompts,
-#     gemini_free_query_prompt1, gemini_free_query_prompt2,
-#     gemini_single_query_env_prompts,
-#     gpt_free_query_env_prompts, gpt_summary_env_prompts,
-# )
-# from vlms.gemini_infer import gemini_query_2, gemini_query_1
+import matplotlib
+matplotlib.use("Agg")   # prevents trying to open a window
+
 from conv_net import CNN, fanin_init
 
-device = 'cuda:1'
+device = 'cuda:0'
 
 def gen_net(in_size=1, out_size=1, H=128, n_layers=3, activation='tanh'):
     net = []
@@ -295,10 +291,10 @@ class RewardModel:
         return  -(target * logprobs).sum() / input.shape[0]
     
     def regoLoss(self, labels, r_hat_1, r_hat_2, t_t_1, t_t_2, tl_t_1, tl_t_2): # modified loss function
-        alpha1 = (t_t_1/tl_t_1).to(device)
-        alpha2 = (t_t_2/tl_t_2).to(device)
+        alpha1 = (t_t_1 / tl_t_1).clamp(min=1e-3).to(device)
+        alpha2 = (t_t_2 / tl_t_2).clamp(min=1e-3).to(device)
         
-        r_hat = torch.cat([100*alpha1*r_hat_1, 100*alpha2*r_hat_2], axis=-1)
+        r_hat = torch.cat([100*alpha1*r_hat_1, 100*alpha2*r_hat_2], axis=-1) # try reducing scaling to avoid exploding gradients
                 
         loss = self.CEloss(r_hat, labels.squeeze())
 
@@ -318,7 +314,7 @@ class RewardModel:
         alpha1 = (t_t_1/tl_t_1).to(device)
         alpha2 = (t_t_2/tl_t_2).to(device)
 
-        scale_const = max(tl_t_1,tl_t_2)
+        scale_const = torch.maximum(tl_t_1,tl_t_2) # to take element wise maximum
         
         r_hat = torch.cat([scale_const*alpha1*r_hat_1, scale_const*alpha2*r_hat_2], axis=-1)
                 
@@ -525,7 +521,7 @@ class RewardModel:
 
     def r_hat_member(self, x, member=-1):
         # the network parameterizes r hat in eqn 1 from the paper
-        return self.ensemble[member](x.to(device))
+        return self.ensemble[member](x.to(device)) # equivalent to calling model.forward(x.to(device))
 
     def r_hat(self, x):
         # they say they average the rewards from each member of the ensemble, but I think this only makes sense if the rewards are already normalized
@@ -603,24 +599,27 @@ class RewardModel:
         #     print('mb error')
             # 
 
+        # batch_index_1 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
+        # batch_index_2 = []
+
         batch_index_1 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
-        batch_index_2 = []
+        batch_index_2 = np.random.choice(len(self.inputs), size=self.mb_size, replace=True)
 
-        # later on add a wrapper function for this
-        for idx in batch_index_1:
-            tstep = self.timesteps[idx]                # current timestep
-            traj_len = self.traj_lens[idx]             # length of the current trajectory we are in
-            traj_start = max(0,idx - tstep + 1)            # start index of the current trajectory
-            traj_end = min(250,idx + traj_len - tstep + 1)  # end index of the current trajectory, change 250 to cfg.pkl_length
+        # # later on add a wrapper function for this
+        # for idx in batch_index_1:
+        #     tstep = self.timesteps[idx]                # current timestep
+        #     traj_len = self.traj_lens[idx]             # length of the current trajectory we are in
+        #     traj_start = max(0,idx - tstep + 1)            # start index of the current trajectory
+        #     traj_end = min(249,idx + traj_len - tstep)  # end index of the current trajectory, change 250 to cfg.pkl_length
 
-            # try to fix numpy and tensor error
-            traj_start = int(traj_start.cpu().item()) if torch.is_tensor(traj_start) else int(traj_start)
-            traj_end   = int(traj_end.cpu().item()) if torch.is_tensor(traj_end) else int(traj_end)
-            # print(traj_start, traj_end, idx)
-            # now randomly sample from the segment self.inputs[traj_start, traj_end]
-            sampled_idx = np.random.randint(traj_start, traj_end)
-            # then append those sampled indices
-            batch_index_2.append(sampled_idx)
+        #     # try to fix numpy and tensor error
+        #     traj_start = int(traj_start.cpu().item()) if torch.is_tensor(traj_start) else int(traj_start)
+        #     traj_end   = int(traj_end.cpu().item()) if torch.is_tensor(traj_end) else int(traj_end)
+        #     # print(traj_start, traj_end, idx)
+        #     # now randomly sample from the segment self.inputs[traj_start, traj_end]
+        #     sampled_idx = np.random.randint(traj_start, traj_end + 1)
+        #     # then append those sampled indices
+        #     batch_index_2.append(sampled_idx)
 
         # breakpoint()
 
@@ -646,6 +645,10 @@ class RewardModel:
     def get_label(self, sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1=None, img_t_2=None):
         sum_r_t_1 = torch.sum(r_t_1, axis=1) # we're processing multiple trajectory pairs in a batch.
         sum_r_t_2 = torch.sum(r_t_2, axis=1)
+
+        # sum_t_t_1 = torch.sum(t_t_1, axis=1) # we're processing multiple trajectory pairs in a batch.
+        # sum_t_t_2 = torch.sum(t_t_2, axis=1)
+        # breakpoint()
         
         # skip the query
         if self.teacher_thres_skip > 0: 
@@ -663,6 +666,9 @@ class RewardModel:
             t_t_2 = t_t_2[max_index]
             sum_r_t_1 = torch.sum(r_t_1, axis=1) # updated reward
             sum_r_t_2 = torch.sum(r_t_2, axis=1) 
+
+            # sum_t_t_1 = torch.sum(t_t_1, axis=1) # update timesteps sum
+            # sum_t_t_2 = torch.sum(t_t_2, axis=1)
         
         # equally preferable
         margin_index = (torch.abs(sum_r_t_1 - sum_r_t_2) < self.teacher_thres_equal).reshape(-1)
@@ -678,22 +684,32 @@ class RewardModel:
         sum_r_t_1 = torch.sum(temp_r_t_1, axis=1) # discounted reward sum
         sum_r_t_2 = torch.sum(temp_r_t_2, axis=1)
 
-        # split_idx = int(0.4*self.mb_size)
-        # breakpoint()
+        rational_labels = 1*(sum_r_t_1 < sum_r_t_2) # ground truth preferences
         
-        # rational_labels = 1*(sum_r_t_1 < sum_r_t_2)
-        # rational_labels[:split_idx] = 1*(t_t_1[:split_idx,:] < t_t_2[:split_idx,:]) # for segment 2 to be preferred, it should have higher time index as it will be more nearer to completion
+        # rew_lab = 1*(sum_r_t_1 < sum_r_t_2)
+        # tim_lab = 1*(sum_t_t_1 < sum_t_t_2)
 
-        # --------- SPLIT 40% / 60% ----------
-        n = sum_r_t_1.shape[0]
-        split_idx = int(0.4 * n)
+        # print("-------------------Reward based labels hehe-------------------------------")
+        # print(rew_lab)
 
-        # time-based labels (40%)
-        rational_labels = torch.zeros((n, 1), dtype=torch.long, device=sum_r_t_1.device)
-        rational_labels[:split_idx] = (t_t_1[:split_idx] < t_t_2[:split_idx]).long().reshape(-1, 1)
+        # print("-------------------Time based labels hehe-------------------------------")
+        # print(tim_lab)
 
-        # reward-based labels (60%)
-        rational_labels[split_idx:] = (sum_r_t_1[split_idx:] < sum_r_t_2[split_idx:]).long().reshape(-1, 1)
+        # breakpoint()
+
+        # # --------- SPLIT 40% / 60% ----------
+        # n = sum_r_t_1.shape[0]
+        # split_idx = int(0.4 * n)
+
+        # # time-based labels (40%)
+        # rational_labels = torch.zeros((n, 1), dtype=torch.long, device=sum_r_t_1.device)
+        # rational_labels[:split_idx] = (sum_t_t_1[:split_idx] < sum_t_t_2[:split_idx]).long().reshape(-1, 1)
+
+        # # reward-based labels (60%)
+        # rational_labels[split_idx:] = (sum_r_t_1[split_idx:] < sum_r_t_2[split_idx:]).long().reshape(-1, 1)
+
+        # # print for debugging to check if majorly sampling 1's causing issue
+        # print(np.unique(rational_labels.cpu().numpy(), return_counts=True))
 
 
         if self.teacher_beta > 0: # Bradley-Terry rational model
@@ -701,10 +717,7 @@ class RewardModel:
                             torch.Tensor(sum_r_t_2)], axis=-1)
             r_hat = r_hat*self.teacher_beta
             ent = F.softmax(r_hat, dim=-1)[:, 1]
-            # logits1 = alpha1 * torch.exp(sum_r_t_1)
-            # logits2 = alpha2 * torch.exp(sum_r_t_2)
-            # prob_seg2 = logits2 / (logits1 + logits2)          # P(segment-2 preferred)
-            # labels = torch.random.binomial(1, prob_seg2).reshape(-1, 1)
+
             labels = torch.bernoulli(ent).int().numpy().reshape(-1, 1) # sample labels
         else:
             labels = rational_labels
@@ -724,126 +737,7 @@ class RewardModel:
         else:
             return sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, img_t_1, img_t_2, labels
     
-    # def kcenter_sampling(self):
-        
-    #     # get queries
-    #     num_init = self.mb_size*self.large_batch
-    #     sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries(
-    #         mb_size=num_init)
-        
-    #     # get final queries based on kmeans clustering
-    #     temp_sa_t_1 = sa_t_1[:,:,:self.ds]
-    #     temp_sa_t_2 = sa_t_2[:,:,:self.ds]
-    #     temp_sa = np.concatenate([temp_sa_t_1.reshape(num_init, -1),  
-    #                               temp_sa_t_2.reshape(num_init, -1)], axis=1)
-        
-    #     max_len = self.capacity if self.buffer_full else self.buffer_index
-        
-    #     tot_sa_1 = self.buffer_seg1[:max_len, :, :self.ds]
-    #     tot_sa_2 = self.buffer_seg2[:max_len, :, :self.ds]
-    #     tot_sa = np.concatenate([tot_sa_1.reshape(max_len, -1),  
-    #                              tot_sa_2.reshape(max_len, -1)], axis=1)
-        
-    #     selected_index = KCenterGreedy(temp_sa, tot_sa, self.mb_size)
 
-    #     r_t_1, sa_t_1 = r_t_1[selected_index], sa_t_1[selected_index]
-    #     r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
-        
-    #     # get labels
-    #     sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
-    #         sa_t_1, sa_t_2, r_t_1, r_t_2)
-        
-    #     if len(labels) > 0:
-    #         self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
-        
-    #     return len(labels)
-    
-    # def kcenter_disagree_sampling(self):
-        
-    #     num_init = self.mb_size*self.large_batch
-    #     num_init_half = int(num_init*0.5)
-        
-    #     # get queries
-    #     sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries(
-    #         mb_size=num_init)
-        
-    #     # get final queries based on uncertainty
-    #     _, disagree = self.get_rank_probability(sa_t_1, sa_t_2)
-    #     top_k_index = (-disagree).argsort()[:num_init_half]
-    #     r_t_1, sa_t_1 = r_t_1[top_k_index], sa_t_1[top_k_index]
-    #     r_t_2, sa_t_2 = r_t_2[top_k_index], sa_t_2[top_k_index]
-        
-    #     # get final queries based on kmeans clustering
-    #     temp_sa_t_1 = sa_t_1[:,:,:self.ds]
-    #     temp_sa_t_2 = sa_t_2[:,:,:self.ds]
-        
-    #     temp_sa = np.concatenate([temp_sa_t_1.reshape(num_init_half, -1),  
-    #                               temp_sa_t_2.reshape(num_init_half, -1)], axis=1)
-        
-    #     max_len = self.capacity if self.buffer_full else self.buffer_index
-        
-    #     tot_sa_1 = self.buffer_seg1[:max_len, :, :self.ds]
-    #     tot_sa_2 = self.buffer_seg2[:max_len, :, :self.ds]
-    #     tot_sa = np.concatenate([tot_sa_1.reshape(max_len, -1),  
-    #                              tot_sa_2.reshape(max_len, -1)], axis=1)
-        
-    #     selected_index = KCenterGreedy(temp_sa, tot_sa, self.mb_size)
-        
-    #     r_t_1, sa_t_1 = r_t_1[selected_index], sa_t_1[selected_index]
-    #     r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
-
-    #     # get labels
-    #     sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
-    #         sa_t_1, sa_t_2, r_t_1, r_t_2)
-        
-    #     if len(labels) > 0:
-    #         self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
-        
-    #     return len(labels)
-    
-    # def kcenter_entropy_sampling(self):
-        
-    #     num_init = self.mb_size*self.large_batch
-    #     num_init_half = int(num_init*0.5)
-        
-    #     # get queries
-    #     sa_t_1, sa_t_2, r_t_1, r_t_2 =  self.get_queries(
-    #         mb_size=num_init)
-        
-        
-    #     # get final queries based on uncertainty
-    #     entropy, _ = self.get_entropy(sa_t_1, sa_t_2)
-    #     top_k_index = (-entropy).argsort()[:num_init_half]
-    #     r_t_1, sa_t_1 = r_t_1[top_k_index], sa_t_1[top_k_index]
-    #     r_t_2, sa_t_2 = r_t_2[top_k_index], sa_t_2[top_k_index]
-        
-    #     # get final queries based on kmeans clustering
-    #     temp_sa_t_1 = sa_t_1[:,:,:self.ds]
-    #     temp_sa_t_2 = sa_t_2[:,:,:self.ds]
-        
-    #     temp_sa = np.concatenate([temp_sa_t_1.reshape(num_init_half, -1),  
-    #                               temp_sa_t_2.reshape(num_init_half, -1)], axis=1)
-        
-    #     max_len = self.capacity if self.buffer_full else self.buffer_index
-        
-    #     tot_sa_1 = self.buffer_seg1[:max_len, :, :self.ds]
-    #     tot_sa_2 = self.buffer_seg2[:max_len, :, :self.ds]
-    #     tot_sa = np.concatenate([tot_sa_1.reshape(max_len, -1),  
-    #                              tot_sa_2.reshape(max_len, -1)], axis=1)
-        
-    #     selected_index = KCenterGreedy(temp_sa, tot_sa, self.mb_size)
-        
-    #     r_t_1, sa_t_1 = r_t_1[selected_index], sa_t_1[selected_index]
-    #     r_t_2, sa_t_2 = r_t_2[selected_index], sa_t_2[selected_index]
-
-    #     # get labels
-    #     sa_t_1, sa_t_2, r_t_1, r_t_2, t_t_1, t_t_2, labels = self.get_label(
-    #         sa_t_1, sa_t_2, r_t_1, r_t_2)
-        
-    #     if len(labels) > 0:
-    #         self.put_queries(sa_t_1, sa_t_2, t_t_1, t_t_2, labels)
-        
-    #     return len(labels)
     
     def uniform_sampling(self):
         # print('uniform sampling')
@@ -892,79 +786,81 @@ class RewardModel:
                     vlm_labels = []
                     gt_labels = []
                 
-            labels = vlm_labels
-            # 
-            if self.use_gt_label:
-                labels = gt_labels
-            if self.flip_label and len(labels)>0:
-                if self.prox_flip:
-                    # Step 1: Extract states s1 and s2 from sa_1 and sa_2
-                    # Pick representative states for each sample
-                    s1 = sa_t_1[:, 0, :self.ds]  # First ds elements represent the state
-                    s2 = sa_t_2[:, 0, :self.ds]
-                    assert s1.shape[1] == self.ds
-                    assert s2.shape[1] == self.ds
-                    # print(sa_t_1)
-                    # print("Shape: ", sa_t_1.shape)
+                labels = vlm_labels
+        # breakpoint()
+        if self.use_gt_label:
+            labels = gt_labels
+        if self.flip_label and len(labels)>0:
+            if self.prox_flip:
+                # Step 1: Extract states s1 and s2 from sa_1 and sa_2
+                # Pick representative states for each sample
+                s1 = sa_t_1[:, 0, :self.ds]  # First ds elements represent the state
+                s2 = sa_t_2[:, 0, :self.ds]
+                assert s1.shape[1] == self.ds
+                assert s2.shape[1] == self.ds
+                # print(sa_t_1)
+                # print("Shape: ", sa_t_1.shape)
+                # print("s1 shape", s1.shape)
+                # Step 2: Process states based on the environment type
+                if "Rope" in self.env_name: 
+                    dim_cons = 30 # Only the position of the keypoints are considered, the position of the pickers are ignored
+                    s1 = s1[:, :dim_cons]
+                    s2 = s2[:, :dim_cons]
+                    # print(s1)
                     # print("s1 shape", s1.shape)
-                    # Step 2: Process states based on the environment type
-                    if "Rope" in self.env_name: 
-                        dim_cons = 30 # Only the position of the keypoints are considered, the position of the pickers are ignored
-                        s1 = s1[:, :dim_cons]
-                        s2 = s2[:, :dim_cons]
-                        # print(s1)
-                        # print("s1 shape", s1.shape)
-                        # For "rope", each sample has 30 elements (10 points with x, y, z each).
-                        # Reshape to (batch, 10, 3) to compute the mean of each coordinate per sample.
-                        s1_reshaped = s1.reshape(-1, 10, 3)
-                        s2_reshaped = s2.reshape(-1, 10, 3)
-                        
-                        # Compute the mean along the points axis (axis=1) for each coordinate.
-                        s1_mean = np.mean(s1_reshaped, axis=1, keepdims=True)  # Shape: (batch, 1, 3)
-                        s2_mean = np.mean(s2_reshaped, axis=1, keepdims=True)
-                        
-                        # Normalize each sample by subtracting the mean for each coordinate.
-                        s1 = (s1_reshaped - s1_mean).reshape(-1, dim_cons)
-                        s2 = (s2_reshaped - s2_mean).reshape(-1, dim_cons)
-                        s_diff = s1 - s2
+                    # For "rope", each sample has 30 elements (10 points with x, y, z each).
+                    # Reshape to (batch, 10, 3) to compute the mean of each coordinate per sample.
+                    s1_reshaped = s1.reshape(-1, 10, 3)
+                    s2_reshaped = s2.reshape(-1, 10, 3)
+                    
+                    # Compute the mean along the points axis (axis=1) for each coordinate.
+                    s1_mean = np.mean(s1_reshaped, axis=1, keepdims=True)  # Shape: (batch, 1, 3)
+                    s2_mean = np.mean(s2_reshaped, axis=1, keepdims=True)
+                    
+                    # Normalize each sample by subtracting the mean for each coordinate.
+                    s1 = (s1_reshaped - s1_mean).reshape(-1, dim_cons)
+                    s2 = (s2_reshaped - s2_mean).reshape(-1, dim_cons)
+                    s_diff = s1 - s2
 
-                    elif "CartPole" in self.env_name:
-                        # For CartPole, ds is assumed to be 4.
-                        # Only take the 0th and 2nd indices; set the 1st and 3rd indices to 0.
-                        temp_s1 = np.zeros_like(s1)
-                        temp_s2 = np.zeros_like(s2)
-                        temp_s1[:, [0, 2]] = s1[:, [0, 2]]
-                        temp_s2[:, [0, 2]] = s2[:, [0, 2]]
-                        s_diff = temp_s1 - temp_s2
-                        s_diff[:, 0] = s_diff[:, 0]/9.6
-                        s_diff[:, 2] = s_diff[:, 2]/0.836
+                elif "CartPole" in self.env_name:
+                    # For CartPole, ds is assumed to be 4.
+                    # Only take the 0th and 2nd indices; set the 1st and 3rd indices to 0.
+                    temp_s1 = np.zeros_like(s1)
+                    temp_s2 = np.zeros_like(s2)
+                    temp_s1[:, [0, 2]] = s1[:, [0, 2]]
+                    temp_s2[:, [0, 2]] = s2[:, [0, 2]]
+                    s_diff = temp_s1 - temp_s2
+                    s_diff[:, 0] = s_diff[:, 0]/9.6
+                    s_diff[:, 2] = s_diff[:, 2]/0.836
 
-                    elif "metaworld" in self.env_name:
-                        # For meta world, directly compute the difference.
-                        selected_indices = np.concatenate([np.arange(4, 18), np.arange(self.ds-3, self.ds)])
-                        # print("selected indices",selected_indices)
-                        s_diff = s1[:, selected_indices] - s2[:, selected_indices]
-                        # print("len of s_diff", s_diff.shape)
-                    else:
-                        raise NotImplementedError
-
-                    distance = np.linalg.norm(s_diff, axis=-1)  # Shape: (batch,)
-
-                    max_norm = 0.4  
-                    flip_prob = np.clip(1 - distance / max_norm, 0, 1)  
-
-                    random_vals = np.random.rand(flip_prob.shape[0])  
-                    flip_mask = random_vals < flip_prob  # True where label should be flipped
-                    labels.ravel()[flip_mask] = 1 - labels.ravel()[flip_mask]
-                    # print(labels)
+                elif "metaworld" in self.env_name:
+                    # For meta world, directly compute the difference.
+                    selected_indices = np.concatenate([np.arange(4, 18), np.arange(self.ds-3, self.ds)])
+                    # print("selected indices",selected_indices)
+                    s_diff = s1[:, selected_indices] - s2[:, selected_indices]
+                    # print("len of s_diff", s_diff.shape)
                 else:
-                    total_elements = labels.size
-                    num_to_flip = int(total_elements * self.flip_percent)
-                    indices_to_flip = np.random.choice(total_elements, num_to_flip, replace=False)
+                    raise NotImplementedError
 
-                    # Using a flat view to update the elements directly
-                    # labels.ravel()[indices_to_flip] = ~labels.ravel()[indices_to_flip]
-                    labels.ravel()[indices_to_flip] = 1 - labels.ravel()[indices_to_flip]
+                distance = np.linalg.norm(s_diff, axis=-1)  # Shape: (batch,)
+
+                max_norm = 0.4  
+                flip_prob = np.clip(1 - distance / max_norm, 0, 1)  
+
+                random_vals = np.random.rand(flip_prob.shape[0])  
+                flip_mask = random_vals < flip_prob  # True where label should be flipped
+                labels.ravel()[flip_mask] = 1 - labels.ravel()[flip_mask]
+                # print(labels)
+            else:
+                total_elements = labels.shape[0]
+                num_to_flip = int(total_elements * self.flip_percent)
+                # print(self.flip_percent, total_elements, num_to_flip)
+                indices_to_flip = np.random.choice(total_elements, num_to_flip, replace=False)
+
+                # Using a flat view to update the elements directly
+                # labels.ravel()[indices_to_flip] = ~labels.ravel()[indices_to_flip]
+                # breakpoint()
+                labels.ravel()[indices_to_flip] = 1 - labels.ravel()[indices_to_flip]
             
         # 
         # if len(labels) > 0:
@@ -1063,6 +959,7 @@ class RewardModel:
                 # labels = self.buffer_label[idxs]
                 # labels = torch.from_numpy(labels.flatten()).long().to(device)
                 # print(f"Member {member} sampling")
+                # breakpoint()
                 sa_t_1, sa_t_2, t_t_1, t_t_2, tl_t_1, tl_t_2, r_t_1, r_t_2, labels = self.uniform_sampling()
                 if member == 0:
                     total += len(labels)
@@ -1101,7 +998,7 @@ class RewardModel:
                 if self.config['loss'] == 'rego':
                     curr_loss = self.regoLoss(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
                 elif self.config['loss'] == 'ce':
-                    curr_loss = self.CEloss(r_hat, labels.squeeze())
+                    curr_loss = self.CEloss(r_hat,labels)
                 elif self.config['loss'] == 'rego1':
                     curr_loss = self.regoLoss1(labels, r_hat1, r_hat2, t_t_1, t_t_2, tl_t_1, tl_t_2)
                 elif self.config['loss'] == 'rego2':
@@ -1114,9 +1011,11 @@ class RewardModel:
                 # compute acc
                 # 
                 _, predicted = torch.max(r_hat.data, 1)
+                # breakpoint()
+
                 # predicted = predicted.to(device)
                 # labels = labels.to(device)
-                correct = (predicted == labels).sum().item()
+                correct = (predicted.view(-1) == labels.view(-1)).sum().item()
                 ensemble_acc[member] += correct
 
                 if self.wandb is not None:

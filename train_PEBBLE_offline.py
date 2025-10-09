@@ -23,8 +23,6 @@ from vlms.blip_infer_2 import blip2_image_text_matching
 from vlms.clip_infer import clip_infer_score as clip_image_text_matching
 import cv2
 
-# Hello WAWU : )
-
 class Offline_Workspace(object):
     def __init__(self, cfg):
         self.work_dir = os.getcwd()
@@ -256,7 +254,7 @@ class Offline_Workspace(object):
                 save_reward_path = os.path.join(self.logger._log_dir, "eval_reward")
                 if not os.path.exists(save_reward_path):
                     os.makedirs(save_reward_path)
-                with open(os.path.join(save_reward_path, "step{:07}_episode{:02}.pkl".format(self.step, episode)), "wb") as f:
+                with open(os.path.join(save_reward_path, "step{:07}_episode{:02}.pkl".format(self.step, episode)), "wb") as f: # probably this stores the rewards, we can use this and train the policy based on this
                     pkl.dump(rewards, f)
                 
             average_episode_reward += episode_reward

@@ -27,8 +27,8 @@ import metaworld.envs.mujoco.env_dict as _env_dict
 from utils import save_numpy_as_gif
 import utils
 import pickle as pkl
-from softgym.registered_env import env_arg_dict, SOFTGYM_ENVS
-from softgym.utils.normalized_env import normalize
+# from softgym.registered_env import env_arg_dict, SOFTGYM_ENVS
+# from softgym.utils.normalized_env import normalize
     
 def make_softgym_env(cfg):
     env_name = cfg.env.replace('softgym_','')
@@ -52,19 +52,19 @@ class TrainConfig:
     device: str = "cuda"
     env: str = ""  # OpenAI gym environment name
     d4rl: Optional[bool] = False
-    data_set_path: Optional[str] = ""
+    data_set_path: Optional[str] = "" # here add path to the pickle files with updated rewards
     nl: Optional[bool] = False
     fl: Optional[str] = ""
-    vlm_reward: Optional[bool] = False
+    vlm_reward: Optional[bool] = True # this should be true to get the predicted rewards from the trained model
     const_reward: Optional[float] = None
     average_reward: Optional[bool] = False
     CLIP: Optional[bool] = False
     seed: int = 42  # Sets Gym, PyTorch and Numpy seeds
-    eval_iter :int = 10 #Number of evaluations when running eval method
+    eval_iter :int = 3 #Number of evaluations when running eval method
     eval_freq: int = int(500)  # How often (time steps) we evaluate -default 5000
     n_episodes: int = 10  # How many episodes run during evaluation
     max_timesteps: int = int(100000)  # Max time steps to run environment - defualt int (1e6)
-    checkpoints_path: Optional[str] = "/project_data/held/sreyas/RL-VLM-F/NL"  # Save path
+    checkpoints_path: Optional[str] = "/share1/iql/"  # Save path
     load_model: str =""   # Model load file name, "" doesn't load
     render: bool = True #render and save outputs in eval
     # IQL
@@ -228,7 +228,7 @@ def wandb_init(config: dict) -> None:
         name=config["name"],
         id=str(uuid.uuid4()),
     )
-    wandb.run.save()
+    # wandb.run.save()
 
 
 @torch.no_grad()
@@ -285,8 +285,9 @@ def eval_actor(
         if int(extra["success"]) != 1 and "metaworld" in env_name:
             obj_to_target = obj_to_target + extra["obj_to_target"]
         episode_rewards.append(episode_reward)
-        # save_gif_path = os.path.join(save_gif_dir, 'step{:07}_episode{:02}_{}.gif'.format(step, i, round(episode_reward, 2)))
-        # utils.save_numpy_as_gif(np.array(images), save_gif_path)
+        # saves the eval gifs
+        save_gif_path = os.path.join(save_gif_dir, 'step{:07}_episode{:02}_{}.gif'.format(step, i, round(episode_reward, 2)))
+        utils.save_numpy_as_gif(np.array(images), save_gif_path)
         
     success = float(success)
     success = success/float(n_episodes)
@@ -625,7 +626,7 @@ def train(config: TrainConfig):
         config.name = config.name + "-" + reward_key
         
     elif config.vlm_reward:
-        config.name = config.name + "-vlm_reward" 
+        config.name = config.name + "-model_reward" # should change this to model reward
     elif config.const_reward is not None:
         config.name = config.name + '-const_reward-' + str(config.const_reward)
     elif config.average_reward:
@@ -662,12 +663,12 @@ def train(config: TrainConfig):
         #dataset = d4rl.qlearning_dataset(env)
     else:
         with open(config.data_set_path, 'rb') as f:
-            dataset = pkl.load(f)
+            dataset = pkl.load(f) # loads the dataset as pickle file, we need to store the learned rewards in pickle file maybe, or calculate here 
         if config.nl:
             print("using reward nl: ", reward_key)
             dataset["rewards"] = dataset[reward_key]
         elif config.vlm_reward:
-            dataset["rewards"] = dataset["rewards_pred"]
+            dataset["rewards"] = dataset["rewards_pred"] # dataset["rewards_pred"] because in the loaded pickle we have this key for predicted rewards
         elif config.const_reward is not None:
             dataset["rewards"] = np.full_like(dataset["rewards"], config.const_reward)
         elif config.average_reward:

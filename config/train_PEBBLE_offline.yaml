@@ -49,9 +49,9 @@ save_video: false
 seed: 1
 
 # Environment
-env: metaworld_drawer-open-v2
+env: metaworld_soccer-v2
 gradient_update: 1
-wandb_name: drawer_open-time-label-ce-0.25
+wandb_name: soccer-gt-label-ce-noflip
 loss: ce
 # vlm label
 vlm_label: 0
@@ -69,9 +69,9 @@ conv_strides: [3, 2, 2, 2] # default
 image_size: 300
 cached_label_path: null
 use_gt_label: false
-flip_label: True
+flip_label: False
 prox_flip: false
-flip_percent: 0.25
+flip_percent: 0
 
 # exp_name
 exp_name: gemini_template_1
@@ -80,14 +80,14 @@ clip_prompt: "The green drawer is completely opened."
 reward: learn_from_preference
 
 # load pretrained models
-reward_model_load_dir: "None"
+reward_model_load_dir: "None" # "/home/agv/rego/models" # this will contain the .pt files for reward models, currently we manually copt the .pt files here after training is done
 reward_model_score_load_dir: "None"
 agent_model_load_dir: "None"
 mode: train
 save_images: false
-data_path: '/share1/RL-VLM-F/test_dummy/drawer-open/expert'
+data_path: '/share1/RL-VLM-F/test_dummy/soccer/expert'
 
-dataset_path: '/share1/RL-VLM-F/test_dummy/drawer-open/expert/data_0.pkl'
+dataset_path: '/share1/RL-VLM-F/test_dummy/soccer/eval/data_eval_1.pkl'
 
 # hydra configuration
 hydra:
